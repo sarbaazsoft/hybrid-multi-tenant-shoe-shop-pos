@@ -1,0 +1,6 @@
+{
+  "summary":  "Updated architectural plan reflecting strict separation between Retail (B2C) and Wholesale (B2B) stores (no hybrid mixing), detailing store provisioning, carton packing and minimum selling pairs in ProductFormModal, B2B carton-based POS checkout, Khata credit ledgers, and A4 dispatch invoicing.",
+  "updatedAt":  "2026-10-08T19:34:37.438610231Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

@@ -1,11 +1,36 @@
 <div align="center">
+  # SarbaazSoft POS
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+  **Multi-Tenant Retail Shoe Shop POS & Inventory Management SaaS**
 
-  <h1>Built with AI Studio</h2>
-
-  <p>The fastest path from prompt to production with Gemini.</p>
-
-  <a href="https://aistudio.google.com/apps">Start building</a>
-
+  SarbaazSoft POS is a multi-tenant retail shoe shop POS and inventory management system developed by SarbaazSoft.
 </div>
+
+---
+
+## Features
+
+* **Retail Management:** Streamlined workflow for inventory and shoe retail sales operations.
+* **AI Integration:** Powered by Google's Gemini API for intelligent inventory tracking and insights.
+* **Secure Authentication:** JWT-based user authentication and authorization.
+* **Database Support:** Persistent data storage configured for retail management.
+
+---
+
+## Getting Started
+
+Follow these instructions to set up and run the project locally on your machine.
+
+### Prerequisites
+
+Ensure you have the following installed on your system:
+
+* **Node.js** (v18.0 or higher recommended)
+* **npm** (comes bundled with Node.js)
+
+### Installation & Local Setup
+
+1. **Clone the repository:**
+   ```bash
+   git clone [https://github.com/sarbaazsoft/Shoe-POS-Retail-Simple.git](https://github.com/sarbaazsoft/Shoe-POS-Retail-Simple.git)
+   cd Shoe-POS-Retail-Simple
