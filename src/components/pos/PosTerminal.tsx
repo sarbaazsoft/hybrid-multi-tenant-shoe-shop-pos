@@ -22,6 +22,9 @@ import {
   CheckCircle2,
   Lock,
   ImageIcon,
+  Truck,
+  BookOpen,
+  Package,
 } from 'lucide-react';
 import { api } from '../../services/api.ts';
 import { playAudioFeedback } from '../../utils/audio.ts';
@@ -57,6 +60,12 @@ interface CartItem {
   maxSalePrice?: number;
   unitPrice: number;
   quantity: number;
+  cartonQuantity?: number;
+  pairsPerCarton?: number;
+  minOrderCartons?: number;
+  cartonPrice?: number;
+  wholesalePrice?: number;
+  packingType?: 'PAIR' | 'CARTON';
   discount: number;
   subtotal: number;
   isPriceOverridden?: boolean;
@@ -116,11 +125,19 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
   const [isExchangeModalOpen, setIsExchangeModalOpen] = useState(false);
 
   // Payment State
-  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'CARD' | 'BANK_TRANSFER' | 'ONLINE'>('CASH');
+  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'CARD' | 'BANK_TRANSFER' | 'ONLINE' | 'KHATA'>('CASH');
   const [cashReceived, setCashReceived] = useState<number | ''>('');
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Business Type & Wholesale B2B Cargo / Dispatch State
+  const isWholesaleStore =
+    String(companySettings?.businessType || companySettings?.business_type || '').toUpperCase() === 'WHOLESALE';
+  const [transportName, setTransportName] = useState('');
+  const [biltyNumber, setBiltyNumber] = useState('');
+  const [bookingDestination, setBookingDestination] = useState('');
+  const [isB2bCargoOpen, setIsB2bCargoOpen] = useState(false);
 
   // Admin Override Modal State
   const [showAdminOverrideModal, setShowAdminOverrideModal] = useState(false);
@@ -626,7 +643,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
     }
   };
 
-  // Add product to POS Cart - Uses product's actual saved selling price and policy
+  // Add product to POS Cart - Uses product's actual saved selling price, policy, and wholesale carton packaging
   const addProductToCart = (product: any) => {
     const prodIdentifier = product.article || product.name || 'Shoe';
     const cost = Math.max(0, Math.round(Number(
@@ -639,17 +656,25 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
 
     const isItemFixed = isFixedPolicy;
 
+    // Wholesale parameters
+    const pairsPerCarton = Math.max(1, Number(product.pairsPerCarton || product.pairs_per_carton || companySettings?.defaultPairsPerCarton || 12));
+    const minOrderCartons = Math.max(1, Number(product.minOrderCartons || product.min_order_cartons || 1));
+    const wholesaleRate = Math.round(Number(
+      product.wholesalePrice ?? product.wholesale_price ?? product.sellingPrice ?? product.selling_price ?? product.maxPrice ?? product.max_price ?? 0
+    ));
+    const cartonPrice = Math.round(Number(
+      product.cartonPrice ?? product.carton_price ?? (wholesaleRate * pairsPerCarton)
+    ));
+
     const retailPrice = getProductRetailPrice(product, companySettings);
     const minFloor = getProductMinFloorPrice(product, companySettings);
 
-    const itemSalePrice = retailPrice;
-    const itemMinSalePrice = isItemFixed ? retailPrice : minFloor;
-    const itemMaxSalePrice = retailPrice;
+    const startingUnitPrice = isWholesaleStore ? (wholesaleRate > 0 ? wholesaleRate : retailPrice) : retailPrice;
+    const itemMinSalePrice = isItemFixed ? startingUnitPrice : minFloor;
+    const itemMaxSalePrice = startingUnitPrice;
 
-    // Initial unit price in cart:
-    // Fixed: saved sellingPrice
-    // Negotiable: saved maxPrice (the sticker M.R.P.)
-    const startingUnitPrice = itemSalePrice;
+    const initialCartons = isWholesaleStore ? minOrderCartons : 0;
+    const initialQuantity = isWholesaleStore ? (minOrderCartons * pairsPerCarton) : 1;
 
     setCart((prevCart) => {
       const existingIdx = prevCart.findIndex((item) => item.productId === product.id);
@@ -657,11 +682,13 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
       if (existingIdx >= 0) {
         // Increase quantity of existing row
         const existing = prevCart[existingIdx];
-        const newQty = existing.quantity + 1;
+        const addedQty = isWholesaleStore ? (existing.pairsPerCarton || pairsPerCarton) : 1;
+        const newQty = existing.quantity + addedQty;
+        const newCartons = isWholesaleStore ? ((existing.cartonQuantity || 0) + 1) : undefined;
 
         if (newQty > product.totalStock) {
           playAudioFeedback.warning();
-          setErrorMessage(`Cannot add more. Stock limit for "${prodIdentifier}" is ${product.totalStock}.`);
+          setErrorMessage(`Cannot add more. Stock limit for "${prodIdentifier}" is ${product.totalStock} pairs.`);
           return prevCart;
         }
 
@@ -670,6 +697,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
         updated[existingIdx] = {
           ...existing,
           quantity: newQty,
+          cartonQuantity: newCartons,
           subtotal: Math.max(0, subtotal),
         };
         return updated;
@@ -678,6 +706,12 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
         if (product.totalStock <= 0) {
           playAudioFeedback.warning();
           setErrorMessage(`Product "${prodIdentifier}" is OUT OF STOCK (0 pairs available).`);
+          return prevCart;
+        }
+
+        if (initialQuantity > product.totalStock) {
+          playAudioFeedback.warning();
+          setErrorMessage(`Cannot add "${prodIdentifier}". Requires min ${minOrderCartons} carton (${initialQuantity} pairs), but only ${product.totalStock} pairs available.`);
           return prevCart;
         }
 
@@ -691,13 +725,19 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
           barcode: product.barcode,
           totalStock: product.totalStock,
           costPrice: cost,
-          salePrice: itemSalePrice,
+          salePrice: startingUnitPrice,
           minSalePrice: itemMinSalePrice,
           maxSalePrice: itemMaxSalePrice,
           unitPrice: startingUnitPrice,
-          quantity: 1,
+          wholesalePrice: wholesaleRate,
+          cartonPrice: cartonPrice,
+          pairsPerCarton: pairsPerCarton,
+          minOrderCartons: minOrderCartons,
+          packingType: isWholesaleStore ? 'CARTON' : 'PAIR',
+          cartonQuantity: isWholesaleStore ? initialCartons : undefined,
+          quantity: initialQuantity,
           discount: 0,
-          subtotal: startingUnitPrice,
+          subtotal: initialQuantity * startingUnitPrice,
           isPriceOverridden: false,
           originalPrice: startingUnitPrice,
         };
@@ -710,7 +750,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
     focusScannerInput(continuousScan);
   };
 
-  // Update Cart Item Quantity
+  // Update Cart Item Quantity (Pairs)
   const updateQuantity = (productId: number, delta: number) => {
     setCart((prevCart) =>
       prevCart
@@ -722,10 +762,13 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
               setErrorMessage(`Cannot exceed available stock of ${item.totalStock} for "${item.article || item.name}".`);
               return item;
             }
+            const ppc = item.pairsPerCarton || 12;
+            const nextCartons = isWholesaleStore ? Math.max(1, Math.round(nextQty / ppc)) : undefined;
             const subtotal = nextQty * item.unitPrice - item.discount;
             return {
               ...item,
               quantity: nextQty,
+              cartonQuantity: nextCartons,
               subtotal: Math.max(0, subtotal),
             };
           }
@@ -734,6 +777,39 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
         .filter(Boolean) as CartItem[]
     );
     // Regain focus on search input so cashier can continue scanning seamlessly
+    focusScannerInput(continuousScan);
+  };
+
+  // Update Wholesale Cart Item Quantity (Master Cartons)
+  const updateCartons = (productId: number, deltaCartons: number) => {
+    setCart((prevCart) =>
+      prevCart
+        .map((item) => {
+          if (item.productId === productId) {
+            const currentCtns = item.cartonQuantity || 1;
+            const nextCtns = currentCtns + deltaCartons;
+            if (nextCtns <= 0) return null;
+
+            const ppc = item.pairsPerCarton || 12;
+            const nextTotalPairs = nextCtns * ppc;
+
+            if (nextTotalPairs > item.totalStock) {
+              setErrorMessage(`Cannot exceed available stock of ${item.totalStock} pairs (${Math.floor(item.totalStock / ppc)} cartons) for "${item.article || item.name}".`);
+              return item;
+            }
+
+            const subtotal = nextTotalPairs * item.unitPrice - item.discount;
+            return {
+              ...item,
+              cartonQuantity: nextCtns,
+              quantity: nextTotalPairs,
+              subtotal: Math.max(0, subtotal),
+            };
+          }
+          return item;
+        })
+        .filter(Boolean) as CartItem[]
+    );
     focusScannerInput(continuousScan);
   };
 
@@ -859,18 +935,64 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
 
     setErrorMessage(null);
     setOfflineNotice(null);
+
+    // Wholesale Minimum Order & Dealer Validation
+    if (isWholesaleStore) {
+      for (const item of cart) {
+        const ctns = item.cartonQuantity || 1;
+        const minCtns = item.minOrderCartons || 1;
+        if (ctns < minCtns) {
+          playAudioFeedback.warning();
+          setErrorMessage(
+            `Minimum Order Limit: "${item.article}" requires at least ${minCtns} carton(s) (${minCtns * (item.pairsPerCarton || 12)} pairs). Current quantity is ${ctns} carton(s).`
+          );
+          return;
+        }
+      }
+
+      if (paymentMethod === 'KHATA' && !selectedCustomerId) {
+        playAudioFeedback.warning();
+        setErrorMessage('Khata (Credit / Udhaar) sale requires selecting a registered Dealer Account.');
+        return;
+      }
+    }
+
     setIsSubmitting(true);
+
+    const totalCartonsSum = isWholesaleStore
+      ? cart.reduce((acc, i) => acc + (i.cartonQuantity || 0), 0)
+      : 0;
+
+    const selectedCust = customers.find((c: any) => c.id === selectedCustomerId);
+    const prevBalance = parseFloat(selectedCust?.current_balance ?? selectedCust?.currentBalance ?? selectedCust?.balance ?? 0) || 0;
+    const effectivePaidAmount = paymentMethod === 'KHATA'
+      ? (typeof cashReceived === 'number' ? cashReceived : 0)
+      : netTotalPayable;
+    const remainingBalance = paymentMethod === 'KHATA'
+      ? Math.max(0, netTotalPayable - effectivePaidAmount)
+      : 0;
 
     const payload: any = {
       items: cart.map((i) => ({
         productId: i.productId,
         quantity: i.quantity,
+        cartonQuantity: i.cartonQuantity,
+        pairsPerCarton: i.pairsPerCarton,
+        packingType: i.packingType || (isWholesaleStore ? 'CARTON' : 'PAIR'),
         unitPrice: i.unitPrice,
         discount: i.discount,
       })),
       customerId: selectedCustomerId,
       paymentMethod,
-      cashReceived: effectiveCashReceived,
+      saleType: isWholesaleStore ? 'WHOLESALE' : 'RETAIL',
+      totalCartons: totalCartonsSum,
+      transportName: isWholesaleStore ? transportName.trim() : undefined,
+      biltyNumber: isWholesaleStore ? biltyNumber.trim() : undefined,
+      bookingDestination: isWholesaleStore ? bookingDestination.trim() : undefined,
+      previousBalance: prevBalance,
+      paidAmount: effectivePaidAmount,
+      remainingBalance,
+      cashReceived: paymentMethod === 'KHATA' ? effectivePaidAmount : effectiveCashReceived,
       changeGiven: changeDue,
       notes,
       isMinPriceOverridden: Boolean(adminOverrideCreds || currentUser.role === 'ADMIN'),
@@ -967,6 +1089,9 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
       onClearInitialExchange?.();
       setCashReceived('');
       setNotes('');
+      setTransportName('');
+      setBiltyNumber('');
+      setBookingDestination('');
       setSelectedCustomerId(null);
       setShowAdminOverrideModal(false);
       setOverridePendingItem(null);
@@ -1502,10 +1627,10 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
             <table className="w-full text-left border-collapse text-xs">
               <thead className="sticky top-0 bg-slate-50 dark:bg-gradient-to-r dark:from-purple-900 dark:via-indigo-950 dark:to-slate-900 text-slate-600 dark:text-white font-semibold border-b border-slate-200 dark:border-purple-800/80 z-10 uppercase tracking-wider text-[11px]">
                 <tr>
-                  <th className="py-2.5 px-4">Article</th>
-                  <th className="py-2.5 px-3 text-center w-28">Quantity</th>
+                  <th className="py-2.5 px-4">{isWholesaleStore ? 'Article / Wholesale Packaging' : 'Article'}</th>
+                  <th className="py-2.5 px-3 text-center w-36">{isWholesaleStore ? 'Cartons / Pairs' : 'Quantity'}</th>
                   <th className="py-2.5 px-3 text-right w-44">
-                    Unit Price {isFixedPolicy ? '(Fixed Policy)' : '(MRP / Floor)'}
+                    {isWholesaleStore ? 'Rate / Pair & Carton' : `Unit Price ${isFixedPolicy ? '(Fixed Policy)' : '(MRP / Floor)'}`}
                   </th>
                   <th className="py-2.5 px-4 text-right w-32">Total</th>
                   <th className="py-2.5 px-3 text-center w-12"></th>
@@ -1596,13 +1721,19 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                               </span>
                             </div>
                           )}
-                          <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-wider ${
-                            isItemFixed
-                              ? 'bg-purple-100 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60'
-                              : 'bg-indigo-100 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60'
-                          }`}>
-                            {isItemFixed ? 'Fixed' : 'Negotiable'}
-                          </span>
+                          {isWholesaleStore ? (
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-wider bg-indigo-100 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60">
+                              B2B Carton
+                            </span>
+                          ) : (
+                            <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-wider ${
+                              isItemFixed
+                                ? 'bg-purple-100 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60'
+                                : 'bg-indigo-100 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60'
+                            }`}>
+                              {isItemFixed ? 'Fixed' : 'Negotiable'}
+                            </span>
+                          )}
                         </div>
                         <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono flex items-center gap-1.5 flex-wrap">
                           <span>Article: <strong className="text-slate-700 dark:text-slate-300 font-semibold">{item.article || item.name}</strong></span>
@@ -1615,6 +1746,20 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                           <span className="opacity-40">|</span>
                           <span>Barcode: <strong className="text-slate-700 dark:text-slate-300 font-semibold">{item.barcode}</strong></span>
                         </div>
+                        {isWholesaleStore && (
+                          <div className="flex items-center gap-1.5 mt-1 flex-wrap text-[10px] font-mono">
+                            <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-semibold">
+                              📦 {item.pairsPerCarton || 12} pairs/ctn
+                            </span>
+                            <span className={`px-1.5 py-0.5 rounded font-bold border ${
+                              (item.cartonQuantity || 1) < (item.minOrderCartons || 1)
+                                ? 'bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800'
+                                : 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
+                            }`}>
+                              Min Order: {item.minOrderCartons || 1} Ctn ({((item.minOrderCartons || 1) * (item.pairsPerCarton || 12))} pr)
+                            </span>
+                          </div>
+                        )}
 
                         {/* Visual Warning: Price below configured minimum profit margin */}
                         {isBelowFloor && (
@@ -1645,34 +1790,85 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
 
                       {/* Quantity Controls */}
                       <td className="py-3 px-3">
-                        <div className="flex items-center justify-center space-x-1">
-                          <button
-                            type="button"
-                            onClick={() => updateQuantity(item.productId, -1)}
-                            className="p-1 rounded bg-slate-100 dark:bg-[#131B2E] hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 active:scale-95 transition border border-slate-200/60 dark:border-slate-700 cursor-pointer"
-                          >
-                            <Minus className="w-3.5 h-3.5" />
-                          </button>
-                          <span className="w-8 text-center font-bold text-slate-900 dark:text-white text-sm">
-                            {item.quantity}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => updateQuantity(item.productId, 1)}
-                            disabled={item.quantity >= item.totalStock}
-                            className="p-1 rounded bg-slate-100 dark:bg-[#131B2E] hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 active:scale-95 disabled:opacity-40 transition border border-slate-200/60 dark:border-slate-700 cursor-pointer"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        {isWholesaleStore ? (
+                          <div className="flex flex-col items-center">
+                            <div className="flex items-center justify-center space-x-1">
+                              <button
+                                type="button"
+                                onClick={() => updateCartons(item.productId, -1)}
+                                className="p-1 rounded bg-slate-100 dark:bg-[#131B2E] hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 active:scale-95 transition border border-slate-200/60 dark:border-slate-700 cursor-pointer"
+                                title="Decrease cartons"
+                              >
+                                <Minus className="w-3.5 h-3.5" />
+                              </button>
+                              <span className="min-w-14 px-1 text-center font-bold text-slate-900 dark:text-white text-xs font-mono">
+                                {item.cartonQuantity || 1} {((item.cartonQuantity || 1) === 1 ? 'Ctn' : 'Ctns')}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => updateCartons(item.productId, 1)}
+                                disabled={((item.cartonQuantity || 1) + 1) * (item.pairsPerCarton || 12) > item.totalStock}
+                                className="p-1 rounded bg-slate-100 dark:bg-[#131B2E] hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 active:scale-95 disabled:opacity-40 transition border border-slate-200/60 dark:border-slate-700 cursor-pointer"
+                                title="Increase cartons"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
+                              {item.quantity} pairs ({item.pairsPerCarton || 12} pr/ctn)
+                            </span>
+                            {(item.cartonQuantity || 1) < (item.minOrderCartons || 1) && (
+                              <span className="text-[9px] font-bold text-rose-600 dark:text-rose-400 mt-0.5">
+                                Min: {item.minOrderCartons || 1} Ctns
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-center space-x-1">
+                            <button
+                              type="button"
+                              onClick={() => updateQuantity(item.productId, -1)}
+                              className="p-1 rounded bg-slate-100 dark:bg-[#131B2E] hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 active:scale-95 transition border border-slate-200/60 dark:border-slate-700 cursor-pointer"
+                            >
+                              <Minus className="w-3.5 h-3.5" />
+                            </button>
+                            <span className="w-8 text-center font-bold text-slate-900 dark:text-white text-sm">
+                              {item.quantity}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => updateQuantity(item.productId, 1)}
+                              disabled={item.quantity >= item.totalStock}
+                              className="p-1 rounded bg-slate-100 dark:bg-[#131B2E] hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 active:scale-95 disabled:opacity-40 transition border border-slate-200/60 dark:border-slate-700 cursor-pointer"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
                       </td>
 
-                      {/* Unit Price (Directly Editable in Negotiable Mode, Fixed in Fixed Mode) */}
+                      {/* Unit Price (Directly Editable in Negotiable Mode, Fixed in Fixed Mode, Wholesale Rate in Wholesale Mode) */}
                       <td className="py-3 px-3 text-right align-top">
                         <div className="flex flex-col items-end">
                           <div className="inline-flex items-center justify-end space-x-1">
                             <span className="text-slate-400 dark:text-slate-500 font-mono text-xs">{currencySymbol}</span>
-                            {isItemFixed ? (
+                            {isWholesaleStore ? (
+                              <>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={item.unitPrice}
+                                  onChange={(e) => {
+                                    const val = Math.round(parseFloat(cleanStockPriceInput(e.target.value)) || 0);
+                                    updateUnitPrice(item.productId, val);
+                                  }}
+                                  className="w-24 text-right px-2 py-1 rounded-lg border font-mono text-xs font-bold outline-none transition focus:ring-2 border-indigo-200 dark:border-indigo-800 bg-white dark:bg-[#0A0E1A] text-slate-900 dark:text-white focus:border-indigo-500 focus:ring-indigo-100 dark:focus:ring-indigo-950/50"
+                                  title={`Wholesale rate per pair: ${currencySymbol} ${formatStockPrice(item.unitPrice)}`}
+                                />
+                                <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">/pr</span>
+                              </>
+                            ) : isItemFixed ? (
                               <input
                                 type="number"
                                 readOnly
@@ -1705,8 +1901,13 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                             )}
                           </div>
 
-                          {/* Reference: Fixed Policy vs Negotiable Range */}
-                          {isItemFixed ? (
+                          {/* Reference: Wholesale Carton Rate / Fixed Policy / Negotiable Range */}
+                          {isWholesaleStore ? (
+                            <div className="text-[10px] text-indigo-600 dark:text-indigo-400 font-mono mt-1 space-y-0.5 text-right flex items-center justify-end gap-1">
+                              <Package className="w-3 h-3 text-indigo-500 shrink-0" />
+                              <span className="font-semibold">{currencySymbol} {formatStockPrice(item.unitPrice * (item.pairsPerCarton || 12))} / carton</span>
+                            </div>
+                          ) : isItemFixed ? (
                             <div className="text-[10px] text-purple-700 dark:text-purple-400 font-mono mt-1 space-y-0.5 text-right flex items-center justify-end gap-1">
                               <Lock className="w-3 h-3 text-purple-500 shrink-0" />
                               <span>Fixed ({currencySymbol} {formatStockPrice(item.unitPrice)})</span>
@@ -1853,6 +2054,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
             }}
             currencySymbol={currencySymbol}
             onModalOpenChange={setIsCustomerModalOpen}
+            isWholesaleStore={isWholesaleStore}
           />
         </motion.div>
 
@@ -2000,7 +2202,10 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
 
             {/* Payment Method Selector */}
             <div className="grid grid-cols-2 gap-2 text-xs">
-              {(['CASH', 'CARD', 'BANK_TRANSFER', 'ONLINE'] as const).map((method) => (
+              {(isWholesaleStore
+                ? (['KHATA', 'CASH', 'BANK_TRANSFER', 'CARD'] as const)
+                : (['CASH', 'CARD', 'BANK_TRANSFER', 'ONLINE'] as const)
+              ).map((method) => (
                 <button
                   key={method}
                   type="button"
@@ -2011,12 +2216,104 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                       : 'bg-slate-100 dark:bg-[#131B2E] text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200/50 dark:border-slate-800 font-semibold'
                   }`}
                 >
+                  {method === 'KHATA' && <BookOpen className="w-3.5 h-3.5" />}
                   {method === 'CASH' && <Banknote className="w-3.5 h-3.5" />}
                   {method === 'CARD' && <CreditCard className="w-3.5 h-3.5" />}
-                  <span>{method === 'BANK_TRANSFER' ? 'Transfer' : method}</span>
+                  <span>{method === 'KHATA' ? 'Khata (Udhaar)' : method === 'BANK_TRANSFER' ? 'Transfer' : method}</span>
                 </button>
               ))}
             </div>
+
+            {/* Khata Credit Ledger Details for Wholesale Dealers */}
+            {paymentMethod === 'KHATA' && (
+              <div className="space-y-2.5 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+                {(() => {
+                  const selectedCust = customers.find((c: any) => c.id === selectedCustomerId);
+                  const prevBal = parseFloat(selectedCust?.current_balance ?? selectedCust?.currentBalance ?? selectedCust?.balance ?? 0) || 0;
+                  const paidNow = typeof cashReceived === 'number' ? cashReceived : 0;
+                  const remBal = Math.max(0, netTotalPayable - paidNow);
+                  const credLimit = parseFloat(selectedCust?.credit_limit ?? selectedCust?.creditLimit ?? 0) || 0;
+
+                  return selectedCust ? (
+                    <div className="p-3 bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 rounded-xl space-y-2">
+                      <div className="flex items-center justify-between font-bold text-indigo-900 dark:text-indigo-200">
+                        <span className="flex items-center gap-1.5">
+                          <BookOpen className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                          <span>Dealer Khata Ledger</span>
+                        </span>
+                        <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-indigo-200/60 dark:bg-indigo-900/80">
+                          {selectedCust.shopName || selectedCust.shop_name || selectedCust.name}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-indigo-200/60 dark:border-indigo-800/40">
+                        <div>
+                          <span className="text-slate-500 dark:text-slate-400">Previous Balance:</span>
+                          <div className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                            {currencySymbol} {formatStockPrice(prevBal)}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-slate-500 dark:text-slate-400">Credit Limit:</span>
+                          <div className="font-mono font-bold text-indigo-700 dark:text-indigo-300">
+                            {credLimit > 0 ? `${currencySymbol} ${formatStockPrice(credLimit)}` : 'Unlimited'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Cash Received Towards Bill (Partial payment or 0 for full credit) */}
+                      <div className="pt-1.5 border-t border-indigo-200/60 dark:border-indigo-800/40 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-slate-700 dark:text-slate-300">Cash Received Now:</span>
+                          <div className="relative w-32">
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-xs">
+                              {currencySymbol}
+                            </span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              placeholder="0 (Full Credit)"
+                              value={cashReceived === '' || isNaN(Number(cashReceived)) ? '' : cashReceived}
+                              onChange={(e) => {
+                                if (e.target.value === '') {
+                                  setCashReceived('');
+                                } else {
+                                  const parsed = parseFloat(e.target.value);
+                                  setCashReceived(isNaN(parsed) ? '' : Math.round(parsed));
+                                }
+                              }}
+                              className="w-full pl-7 pr-2 py-1 text-right font-mono font-bold text-xs bg-white dark:bg-[#0A0E1A] border border-indigo-200 dark:border-indigo-700 rounded-lg text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-indigo-400"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex justify-between items-center text-[11px] pt-1">
+                          <span className="text-slate-600 dark:text-slate-400">Book to Khata (Remaining):</span>
+                          <span className="font-mono font-black text-rose-600 dark:text-rose-400">
+                            +{currencySymbol} {formatStockPrice(remBal)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center text-[11px] pt-0.5 font-bold">
+                          <span className="text-indigo-950 dark:text-indigo-100">New Total Balance:</span>
+                          <span className="font-mono font-black text-indigo-700 dark:text-indigo-300">
+                            {currencySymbol} {formatStockPrice(prevBal + remBal)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-xl text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <strong className="block font-bold">Select Dealer Account:</strong>
+                        Please select or register a dealer in the customer box above to book this order on Khata (Credit).
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
 
             {/* Cash Received Tender & Quick Cash Buttons */}
             {paymentMethod === 'CASH' && (
@@ -2111,6 +2408,64 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
               onChange={(e) => setNotes(e.target.value)}
               className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-[#0A0E1A] border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none focus:border-blue-600 dark:focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-950/40"
             />
+
+            {/* Wholesale B2B Cargo / Bilty Dispatch Card */}
+            {isWholesaleStore && (
+              <div className="p-3 bg-slate-50 dark:bg-[#131B2E] border border-slate-200 dark:border-slate-800 rounded-xl space-y-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setIsB2bCargoOpen(!isB2bCargoOpen)}
+                  className="w-full flex items-center justify-between text-left font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Truck className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>Cargo & Bilty Dispatch</span>
+                    {(transportName || biltyNumber || bookingDestination) && (
+                      <span className="px-1.5 py-0.2 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 text-[9px] font-bold">
+                        Set
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold">
+                    {isB2bCargoOpen ? '▲ Hide' : '▼ Add Cargo Details'}
+                  </span>
+                </button>
+
+                {isB2bCargoOpen && (
+                  <div className="space-y-2 pt-1 animate-in fade-in duration-150">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Transport (e.g. Faisal Movers)"
+                        value={transportName}
+                        onChange={(e) => setTransportName(e.target.value)}
+                        className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-[#0A0E1A] border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white placeholder:text-slate-400 outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Bilty / LR # (e.g. LR-4921)"
+                        value={biltyNumber}
+                        onChange={(e) => setBiltyNumber(e.target.value)}
+                        className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-[#0A0E1A] border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white placeholder:text-slate-400 outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Destination City (e.g. Rawalpindi / Peshawar)"
+                      value={bookingDestination}
+                      onChange={(e) => setBookingDestination(e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-[#0A0E1A] border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white placeholder:text-slate-400 outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-mono px-1">
+                      <span>Total Cartons to Dispatch:</span>
+                      <strong className="text-slate-800 dark:text-slate-200 font-bold">
+                        {cart.reduce((acc, i) => acc + (i.cartonQuantity || 0), 0)} Cartons ({totalItemsCount} Pairs)
+                      </strong>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* CHECKOUT BUTTON (F9) & DELETE SALE (F8) */}

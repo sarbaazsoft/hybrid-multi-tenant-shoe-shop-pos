@@ -39,7 +39,11 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
   companySettings,
   onClose,
 }) => {
-  const [printFormat, setPrintFormat] = useState<'thermal' | 'a4'>('thermal');
+  const isWholesaleInvoice =
+    String(sale.sale_type || '').toUpperCase() === 'WHOLESALE' ||
+    String(companySettings?.businessType || companySettings?.business_type || '').toUpperCase() === 'WHOLESALE';
+
+  const [printFormat, setPrintFormat] = useState<'thermal' | 'a4'>(isWholesaleInvoice ? 'a4' : 'thermal');
   const [printerSettings] = useState(getSavedPrinterSettings());
   const [isPrintingDirect, setIsPrintingDirect] = useState(false);
   const [directFeedback, setDirectFeedback] = useState<string | null>(null);
@@ -53,6 +57,16 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
   const hasCustomerPhone = customerPhone.length > 0;
   const shouldShowDigitalReceipt = !isWalkInCustomer && hasCustomerPhone;
 
+  // Wholesale Dealer & Cargo Details
+  const dealerShopName = String(sale.customer_shop_name || sale.customer?.shop_name || sale.customer?.shopName || '').trim();
+  const dealerMarket = String(sale.customer_market_name || sale.customer?.market_name || sale.customer?.marketName || '').trim();
+  const dealerCity = String(sale.customer_city || sale.customer?.city || '').trim();
+  const dealerNtn = String(sale.customer_ntn || sale.customer?.ntn_number || sale.customer?.ntnNumber || '').trim();
+  const transportName = String(sale.transport_name || '').trim();
+  const biltyNumber = String(sale.bilty_number || '').trim();
+  const bookingDestination = String(sale.booking_destination || '').trim();
+  const totalCartons = Number(sale.total_cartons || 0);
+
   // Digital Receipt State (SMS & WhatsApp)
   const [recipientPhone, setRecipientPhone] = useState<string>(customerPhone);
   const [customNote, setCustomNote] = useState<string>('');
@@ -65,12 +79,12 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
     companySettings?.name ||
     companySettings?.company_name ||
     companySettings?.companyName ||
-    'Retail Store';
+    (isWholesaleInvoice ? 'Footwear Wholesale Traders' : 'Retail Store');
   const storeAddress = companySettings?.address || '';
   const storePhone = companySettings?.phone || '';
   const storeEmail = companySettings?.email || '';
   const taxNumber = companySettings?.tax_number || companySettings?.taxNumber || '';
-  const invoiceFooter = companySettings?.invoice_footer || companySettings?.invoiceFooter || 'Thank you for your visit!';
+  const invoiceFooter = companySettings?.invoice_footer || companySettings?.invoiceFooter || 'Thank you for your business!';
   const showReceiptLogo = Boolean(
     companySettings?.show_receipt_logo ?? companySettings?.showReceiptLogo ?? false
   );
@@ -86,6 +100,10 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
   const discount = parseFloat(sale.discount || 0);
   const cashReceived = parseFloat(sale.cash_received || totalAmount);
   const changeGiven = parseFloat(sale.change_given || 0);
+
+  const previousBalance = parseFloat(sale.previous_balance || 0);
+  const paidAmount = parseFloat(sale.paid_amount ?? sale.cash_received ?? totalAmount);
+  const remainingBalance = parseFloat(sale.remaining_balance ?? Math.max(0, (previousBalance + totalAmount) - paidAmount));
 
   // Generate WhatsApp & SMS text dynamically with optional custom note
   const whatsAppText = useMemo(() => {
@@ -241,7 +259,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
               }`}
             >
               <FileText className="w-3.5 h-3.5" />
-              <span>A4 Invoice</span>
+              <span>{isWholesaleInvoice ? 'A4 Dispatch Invoice' : 'A4 Invoice'}</span>
             </button>
           </div>
 
@@ -596,8 +614,12 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                   </div>
                 </div>
                 <div className="text-right">
-                  <span className="inline-block px-3 py-1 bg-slate-100 text-slate-800 font-bold text-sm tracking-wider uppercase rounded-sm border border-slate-300">
-                    TAX INVOICE
+                  <span className={`inline-block px-3 py-1 font-bold tracking-wider uppercase rounded-sm border ${
+                    isWholesaleInvoice
+                      ? 'bg-indigo-50 text-indigo-900 border-indigo-300 text-xs'
+                      : 'bg-slate-100 text-slate-800 border-slate-300 text-sm'
+                  }`}>
+                    {isWholesaleInvoice ? 'WHOLESALE COMMERCIAL TAX INVOICE & DISPATCH' : 'TAX INVOICE'}
                   </span>
                   <p className="text-gray-900 font-bold mt-2 text-sm">{sale.invoice_number}</p>
                   <p className="text-gray-500 text-xs mt-0.5">Date: {sale.sale_date}</p>
@@ -607,17 +629,54 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
               {/* Bill to & Sale details */}
               <div className="grid grid-cols-2 gap-4 py-4 border-b border-gray-200 text-xs">
                 <div>
-                  <span className="font-semibold text-gray-500 uppercase tracking-wider text-[10px]">BILLED TO:</span>
+                  <span className="font-semibold text-gray-500 uppercase tracking-wider text-[10px]">
+                    {isWholesaleInvoice ? 'DEALER / BILLED TO:' : 'BILLED TO:'}
+                  </span>
+                  {dealerShopName ? (
+                    <p className="font-black text-gray-900 text-sm mt-0.5">{dealerShopName}</p>
+                  ) : null}
                   <p className="font-bold text-gray-900 mt-0.5">{sale.customer_name || 'Walk-in Customer'}</p>
                   {sale.customer_phone && <p className="text-gray-600">Contact: {sale.customer_phone}</p>}
-                  {sale.customer_address && <p className="text-gray-600">{sale.customer_address}</p>}
+                  {(dealerMarket || dealerCity || sale.customer_address) && (
+                    <p className="text-gray-600">
+                      {[dealerMarket, dealerCity || sale.customer_address].filter(Boolean).join(', ')}
+                    </p>
+                  )}
+                  {dealerNtn && <p className="text-gray-600 font-mono">NTN: {dealerNtn}</p>}
                 </div>
                 <div className="text-right">
                   <span className="font-semibold text-gray-500 uppercase tracking-wider text-[10px]">PAYMENT DETAILS:</span>
-                  <p className="text-gray-800 mt-0.5"><span className="font-medium">Method:</span> {sale.payment_method}</p>
+                  <p className="text-gray-800 mt-0.5">
+                    <span className="font-medium">Method:</span>{' '}
+                    <strong className="text-gray-900">{sale.payment_method === 'KHATA' ? 'Khata (Credit Ledger)' : sale.payment_method}</strong>
+                  </p>
                   <p className="text-gray-800"><span className="font-medium">Cashier:</span> {sale.cashier_name || 'Counter Operator'}</p>
                 </div>
               </div>
+
+              {/* Wholesale Cargo / Transport Dispatch Info */}
+              {isWholesaleInvoice && (transportName || biltyNumber || bookingDestination || totalCartons > 0) && (
+                <div className="my-3 p-3 bg-slate-50 border border-slate-200 rounded text-xs grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div>
+                    <span className="text-[10px] text-gray-500 font-semibold uppercase block">Transport / Cargo</span>
+                    <strong className="text-gray-900">{transportName || 'Direct Delivery'}</strong>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-500 font-semibold uppercase block">Bilty / LR #</span>
+                    <strong className="text-gray-900 font-mono">{biltyNumber || 'N/A'}</strong>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-500 font-semibold uppercase block">Destination City</span>
+                    <strong className="text-gray-900">{bookingDestination || dealerCity || 'Local'}</strong>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-500 font-semibold uppercase block">Total Master Cartons</span>
+                    <strong className="text-indigo-700 font-mono font-black">
+                      {totalCartons || items.reduce((acc: number, it: any) => acc + (it.carton_quantity || it.cartonQuantity || 1), 0)} Ctns
+                    </strong>
+                  </div>
+                </div>
+              )}
 
               {/* Table */}
               <table className="w-full mt-4 border-collapse text-xs">
@@ -625,37 +684,69 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                   <tr className="bg-slate-100 border-y border-gray-300 text-gray-700">
                     <th className="py-2 px-3 text-left font-semibold">#</th>
                     <th className="py-2 px-3 text-left font-semibold">Article</th>
-                    <th className="py-2 px-3 text-center font-semibold">Qty</th>
-                    <th className="py-2 px-3 text-right font-semibold">Unit Price</th>
-                    <th className="py-2 px-3 text-right font-semibold">Discount</th>
+                    {isWholesaleInvoice ? (
+                      <>
+                        <th className="py-2 px-3 text-center font-semibold">Cartons</th>
+                        <th className="py-2 px-3 text-center font-semibold">Packing</th>
+                        <th className="py-2 px-3 text-center font-semibold">Total Pairs</th>
+                        <th className="py-2 px-3 text-right font-semibold">Wholesale Rate</th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="py-2 px-3 text-center font-semibold">Qty</th>
+                        <th className="py-2 px-3 text-right font-semibold">Unit Price</th>
+                        <th className="py-2 px-3 text-right font-semibold">Discount</th>
+                      </>
+                    )}
                     <th className="py-2 px-3 text-right font-semibold">Total Amount</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {items.map((item: any, idx: number) => (
-                    <tr key={idx}>
-                      <td className="py-2.5 px-3 text-gray-500">{idx + 1}</td>
-                      <td className="invoice-item-article py-2.5 px-3 font-medium text-gray-900 dark:text-white">{item.article || item.product_name || item.name}</td>
-                      <td className="py-2.5 px-3 text-center text-gray-800">{item.quantity}</td>
-                      <td className="invoice-item-price py-2.5 px-3 text-right text-gray-700 dark:text-white">
-                        {currencySymbol} {formatStockPrice(item.unit_price)}
-                      </td>
-                      <td className="py-2.5 px-3 text-right text-gray-500">
-                        {parseFloat(item.discount || 0) > 0 ? `${currencySymbol} ${formatStockPrice(item.discount)}` : '-'}
-                      </td>
-                      <td className="invoice-item-price py-2.5 px-3 text-right font-semibold text-gray-900 dark:text-white">
-                        {currencySymbol} {formatStockPrice(item.subtotal)}
-                      </td>
-                    </tr>
-                  ))}
+                  {items.map((item: any, idx: number) => {
+                    const ctnQty = item.carton_quantity || item.cartonQuantity || Math.max(1, Math.round(item.quantity / (item.pairs_per_carton || item.pairsPerCarton || 12)));
+                    const ppc = item.pairs_per_carton || item.pairsPerCarton || 12;
+
+                    return (
+                      <tr key={idx}>
+                        <td className="py-2.5 px-3 text-gray-500">{idx + 1}</td>
+                        <td className="invoice-item-article py-2.5 px-3 font-medium text-gray-900 dark:text-white">
+                          <div>{item.article || item.product_name || item.name}</div>
+                          {item.brand_name && <div className="text-[10px] text-gray-500">{item.brand_name}</div>}
+                        </td>
+                        {isWholesaleInvoice ? (
+                          <>
+                            <td className="py-2.5 px-3 text-center font-bold text-gray-900 font-mono">{ctnQty} Ctn</td>
+                            <td className="py-2.5 px-3 text-center text-gray-600 font-mono text-[11px]">{ppc} pr/ctn</td>
+                            <td className="py-2.5 px-3 text-center text-gray-800 font-mono">{item.quantity} pr</td>
+                            <td className="invoice-item-price py-2.5 px-3 text-right text-gray-700 dark:text-white font-mono">
+                              {currencySymbol} {formatStockPrice(item.unit_price)}
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="py-2.5 px-3 text-center text-gray-800">{item.quantity}</td>
+                            <td className="invoice-item-price py-2.5 px-3 text-right text-gray-700 dark:text-white font-mono">
+                              {currencySymbol} {formatStockPrice(item.unit_price)}
+                            </td>
+                            <td className="py-2.5 px-3 text-right text-gray-500">
+                              {parseFloat(item.discount || 0) > 0 ? `${currencySymbol} ${formatStockPrice(item.discount)}` : '-'}
+                            </td>
+                          </>
+                        )}
+                        <td className="invoice-item-price py-2.5 px-3 text-right font-semibold text-gray-900 dark:text-white font-mono">
+                          {currencySymbol} {formatStockPrice(item.subtotal)}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
 
               {/* Summary calculations */}
               <div className="flex justify-end mt-4 pt-3 border-t border-gray-300">
-                <div className="w-64 space-y-1.5 text-xs">
+                <div className="w-72 space-y-1.5 text-xs">
                   <div className="flex justify-between text-gray-600">
-                    <span>Subtotal:</span>
+                    <span>Current Bill Subtotal:</span>
                     <span>{currencySymbol} {formatStockPrice(subtotal)}</span>
                   </div>
                   {discount > 0 && (
@@ -665,17 +756,39 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                     </div>
                   )}
                   <div className="invoice-total-payable flex justify-between font-bold text-sm text-gray-900 dark:text-white border-t border-gray-300 pt-1.5">
-                    <span>NET PAYABLE:</span>
+                    <span>{isWholesaleInvoice ? 'CURRENT INVOICE TOTAL:' : 'NET PAYABLE:'}</span>
                     <span>{currencySymbol} {formatStockPrice(totalAmount)}</span>
                   </div>
-                  <div className="flex justify-between text-gray-600 pt-1">
-                    <span>Cash Received:</span>
-                    <span>{currencySymbol} {formatStockPrice(cashReceived)}</span>
+
+                  {isWholesaleInvoice && previousBalance !== 0 && (
+                    <div className="flex justify-between text-gray-700 font-medium">
+                      <span>Previous Khata Balance:</span>
+                      <span className="font-mono">{currencySymbol} {formatStockPrice(previousBalance)}</span>
+                    </div>
+                  )}
+                  {isWholesaleInvoice && previousBalance !== 0 && (
+                    <div className="flex justify-between font-bold text-gray-900 border-t border-dashed border-gray-200 pt-1">
+                      <span>NET TOTAL DUE:</span>
+                      <span className="font-mono">{currencySymbol} {formatStockPrice(previousBalance + totalAmount)}</span>
+                    </div>
+                  )}
+
+                  <div className="flex justify-between text-gray-700 pt-1">
+                    <span>{sale.payment_method === 'KHATA' ? 'Paid / Received Now:' : 'Cash Received:'}</span>
+                    <span className="font-mono">{currencySymbol} {formatStockPrice(paidAmount)}</span>
                   </div>
-                  <div className="flex justify-between text-gray-800 font-medium">
-                    <span>Change Given:</span>
-                    <span>{currencySymbol} {formatStockPrice(changeGiven)}</span>
-                  </div>
+
+                  {sale.payment_method === 'KHATA' || (isWholesaleInvoice && remainingBalance > 0) ? (
+                    <div className="flex justify-between text-rose-700 font-bold border-t border-gray-200 pt-1">
+                      <span>Remaining Khata Balance:</span>
+                      <span className="font-mono">{currencySymbol} {formatStockPrice(remainingBalance)}</span>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between text-gray-800 font-medium">
+                      <span>Change Given:</span>
+                      <span className="font-mono">{currencySymbol} {formatStockPrice(changeGiven)}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -821,7 +934,9 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <h2 style={{ fontSize: '18px', fontWeight: 'bold', margin: 0, color: '#000000' }}>TAX INVOICE</h2>
+                <h2 style={{ fontSize: '16px', fontWeight: 'bold', margin: 0, color: '#000000', textTransform: 'uppercase' }}>
+                  {isWholesaleInvoice ? 'WHOLESALE COMMERCIAL TAX INVOICE & DISPATCH' : 'TAX INVOICE'}
+                </h2>
                 <p style={{ margin: '4px 0', fontWeight: 'bold', color: '#000000' }}>{sale.invoice_number}</p>
                 <p style={{ margin: '2px 0', color: '#444444' }}>Date: {sale.sale_date}</p>
               </div>
@@ -829,48 +944,108 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
 
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', color: '#000000' }}>
               <div>
-                <strong style={{ fontSize: '11px', textTransform: 'uppercase' }}>Billed To:</strong>
+                <strong style={{ fontSize: '11px', textTransform: 'uppercase' }}>
+                  {isWholesaleInvoice ? 'Dealer / Billed To:' : 'Billed To:'}
+                </strong>
+                {dealerShopName ? (
+                  <div style={{ fontWeight: 'bold', fontSize: '13px' }}>{dealerShopName}</div>
+                ) : null}
                 <div>{sale.customer_name || 'Walk-in Customer'}</div>
                 {sale.customer_phone && <div>Contact: {sale.customer_phone}</div>}
-                {sale.customer_address && <div>{sale.customer_address}</div>}
+                {(dealerMarket || dealerCity || sale.customer_address) && (
+                  <div>{[dealerMarket, dealerCity || sale.customer_address].filter(Boolean).join(', ')}</div>
+                )}
+                {dealerNtn && <div>NTN: {dealerNtn}</div>}
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div><strong>Payment:</strong> {sale.payment_method}</div>
+                <div><strong>Payment:</strong> {sale.payment_method === 'KHATA' ? 'Khata (Credit Ledger)' : sale.payment_method}</div>
                 <div><strong>Cashier:</strong> {sale.cashier_name || 'Counter Operator'}</div>
               </div>
             </div>
+
+            {/* Wholesale Cargo / Transport Dispatch Details */}
+            {isWholesaleInvoice && (transportName || biltyNumber || bookingDestination || totalCartons > 0) && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', padding: '8px', backgroundColor: '#f9f9f9', border: '1px solid #ddd', marginBottom: '10px', fontSize: '11px' }}>
+                <div>
+                  <span style={{ fontSize: '9px', color: '#666', textTransform: 'uppercase', display: 'block' }}>Transport</span>
+                  <strong>{transportName || 'Direct Delivery'}</strong>
+                </div>
+                <div>
+                  <span style={{ fontSize: '9px', color: '#666', textTransform: 'uppercase', display: 'block' }}>Bilty / LR #</span>
+                  <strong>{biltyNumber || 'N/A'}</strong>
+                </div>
+                <div>
+                  <span style={{ fontSize: '9px', color: '#666', textTransform: 'uppercase', display: 'block' }}>Destination City</span>
+                  <strong>{bookingDestination || dealerCity || 'Local'}</strong>
+                </div>
+                <div>
+                  <span style={{ fontSize: '9px', color: '#666', textTransform: 'uppercase', display: 'block' }}>Total Cartons</span>
+                  <strong>{totalCartons || items.reduce((acc: number, it: any) => acc + (it.carton_quantity || it.cartonQuantity || 1), 0)} Ctns</strong>
+                </div>
+              </div>
+            )}
 
             <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px', color: '#000000' }}>
               <thead>
                 <tr style={{ backgroundColor: '#f0f0f0', borderBottom: '1px solid #000' }}>
                   <th style={{ padding: '6px', textAlign: 'left' }}>#</th>
                   <th style={{ padding: '6px', textAlign: 'left' }}>Article</th>
-                  <th style={{ padding: '6px', textAlign: 'center' }}>Qty</th>
-                  <th style={{ padding: '6px', textAlign: 'right' }}>Unit Price</th>
-                  <th style={{ padding: '6px', textAlign: 'right' }}>Discount</th>
-                  <th style={{ padding: '6px', textAlign: 'right' }}>Total</th>
+                  {isWholesaleInvoice ? (
+                    <>
+                      <th style={{ padding: '6px', textAlign: 'center' }}>Cartons</th>
+                      <th style={{ padding: '6px', textAlign: 'center' }}>Packing</th>
+                      <th style={{ padding: '6px', textAlign: 'center' }}>Total Pairs</th>
+                      <th style={{ padding: '6px', textAlign: 'right' }}>Wholesale Rate</th>
+                    </>
+                  ) : (
+                    <>
+                      <th style={{ padding: '6px', textAlign: 'center' }}>Qty</th>
+                      <th style={{ padding: '6px', textAlign: 'right' }}>Unit Price</th>
+                      <th style={{ padding: '6px', textAlign: 'right' }}>Discount</th>
+                    </>
+                  )}
+                  <th style={{ padding: '6px', textAlign: 'right' }}>Total Amount</th>
                 </tr>
               </thead>
               <tbody>
-                {items.map((item: any, idx: number) => (
-                  <tr key={idx} style={{ borderBottom: '1px solid #ddd' }}>
-                    <td style={{ padding: '6px' }}>{idx + 1}</td>
-                    <td style={{ padding: '6px' }}><strong>{item.article || item.product_name || item.name}</strong></td>
-                    <td style={{ padding: '6px', textAlign: 'center' }}>{item.quantity}</td>
-                    <td style={{ padding: '6px', textAlign: 'right' }}>{currencySymbol} {formatStockPrice(item.unit_price)}</td>
-                    <td style={{ padding: '6px', textAlign: 'right' }}>
-                      {parseFloat(item.discount || 0) > 0 ? `${currencySymbol} ${formatStockPrice(item.discount)}` : '-'}
-                    </td>
-                    <td style={{ padding: '6px', textAlign: 'right' }}>{currencySymbol} {formatStockPrice(item.subtotal)}</td>
-                  </tr>
-                ))}
+                {items.map((item: any, idx: number) => {
+                  const ctnQty = item.carton_quantity || item.cartonQuantity || Math.max(1, Math.round(item.quantity / (item.pairs_per_carton || item.pairsPerCarton || 12)));
+                  const ppc = item.pairs_per_carton || item.pairsPerCarton || 12;
+
+                  return (
+                    <tr key={idx} style={{ borderBottom: '1px solid #ddd' }}>
+                      <td style={{ padding: '6px' }}>{idx + 1}</td>
+                      <td style={{ padding: '6px' }}>
+                        <strong>{item.article || item.product_name || item.name}</strong>
+                        {item.brand_name && <div style={{ fontSize: '9px', color: '#555' }}>{item.brand_name}</div>}
+                      </td>
+                      {isWholesaleInvoice ? (
+                        <>
+                          <td style={{ padding: '6px', textAlign: 'center', fontWeight: 'bold' }}>{ctnQty} Ctn</td>
+                          <td style={{ padding: '6px', textAlign: 'center', fontSize: '10px' }}>{ppc} pr/ctn</td>
+                          <td style={{ padding: '6px', textAlign: 'center' }}>{item.quantity} pr</td>
+                          <td style={{ padding: '6px', textAlign: 'right' }}>{currencySymbol} {formatStockPrice(item.unit_price)}</td>
+                        </>
+                      ) : (
+                        <>
+                          <td style={{ padding: '6px', textAlign: 'center' }}>{item.quantity}</td>
+                          <td style={{ padding: '6px', textAlign: 'right' }}>{currencySymbol} {formatStockPrice(item.unit_price)}</td>
+                          <td style={{ padding: '6px', textAlign: 'right' }}>
+                            {parseFloat(item.discount || 0) > 0 ? `${currencySymbol} ${formatStockPrice(item.discount)}` : '-'}
+                          </td>
+                        </>
+                      )}
+                      <td style={{ padding: '6px', textAlign: 'right', fontWeight: 'bold' }}>{currencySymbol} {formatStockPrice(item.subtotal)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px', color: '#000000' }}>
-              <div style={{ width: '240px', lineHeight: '1.6' }}>
+              <div style={{ width: '270px', lineHeight: '1.6' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Subtotal:</span>
+                  <span>Current Bill Subtotal:</span>
                   <span>{currencySymbol} {formatStockPrice(subtotal)}</span>
                 </div>
                 {discount > 0 && (
@@ -879,18 +1054,40 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                     <span>-{currencySymbol} {formatStockPrice(discount)}</span>
                   </div>
                 )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '14px', borderTop: '1px solid #000', paddingTop: '4px' }}>
-                  <span>Net Payable:</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '13px', borderTop: '1px solid #000', paddingTop: '4px' }}>
+                  <span>{isWholesaleInvoice ? 'Current Invoice Total:' : 'Net Payable:'}</span>
                   <span>{currencySymbol} {formatStockPrice(totalAmount)}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Cash Paid:</span>
-                  <span>{currencySymbol} {formatStockPrice(cashReceived)}</span>
+
+                {isWholesaleInvoice && previousBalance !== 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Previous Khata Balance:</span>
+                    <span>{currencySymbol} {formatStockPrice(previousBalance)}</span>
+                  </div>
+                )}
+                {isWholesaleInvoice && previousBalance !== 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', borderTop: '1px dashed #999', paddingTop: '2px' }}>
+                    <span>Net Total Due:</span>
+                    <span>{currencySymbol} {formatStockPrice(previousBalance + totalAmount)}</span>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '2px' }}>
+                  <span>{sale.payment_method === 'KHATA' ? 'Paid / Received Now:' : 'Cash Paid:'}</span>
+                  <span>{currencySymbol} {formatStockPrice(paidAmount)}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
-                  <span>Change Given:</span>
-                  <span>{currencySymbol} {formatStockPrice(changeGiven)}</span>
-                </div>
+
+                {sale.payment_method === 'KHATA' || (isWholesaleInvoice && remainingBalance > 0) ? (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', borderTop: '1px solid #000', paddingTop: '4px', color: '#b91c1c' }}>
+                    <span>Remaining Khata Balance:</span>
+                    <span>{currencySymbol} {formatStockPrice(remainingBalance)}</span>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+                    <span>Change Given:</span>
+                    <span>{currencySymbol} {formatStockPrice(changeGiven)}</span>
+                  </div>
+                )}
               </div>
             </div>
 

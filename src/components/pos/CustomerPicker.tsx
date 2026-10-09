@@ -29,6 +29,7 @@ interface CustomerPickerProps {
   onCustomerCreated: (newCustomer: Customer) => void;
   currencySymbol: string;
   onModalOpenChange?: (isOpen: boolean) => void;
+  isWholesaleStore?: boolean;
 }
 
 interface IndexedCustomer {
@@ -39,6 +40,11 @@ interface IndexedCustomer {
   nameLower: string;
   phoneClean: string;
   phoneLower: string;
+  shopName: string;
+  marketName: string;
+  city: string;
+  creditLimit: number;
+  currentBalance: number;
   loyaltyPoints: number;
   totalSpent: number;
   totalOrders: number;
@@ -95,6 +101,7 @@ export const CustomerPicker: React.FC<CustomerPickerProps> = ({
   onCustomerCreated,
   currencySymbol,
   onModalOpenChange,
+  isWholesaleStore = false,
 }) => {
   // Combobox autocomplete state — suggestions only open when typing (searchQuery.trim().length > 0)
   const [searchQuery, setSearchQuery] = useState('');
@@ -115,6 +122,8 @@ export const CustomerPicker: React.FC<CustomerPickerProps> = ({
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const [quickAddInModal, setQuickAddInModal] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState('');
+  const [newCustomerShop, setNewCustomerShop] = useState('');
+  const [newCustomerCity, setNewCustomerCity] = useState('');
   const [newCustomerPhone, setNewCustomerPhone] = useState('');
   const [newCustomerAddress, setNewCustomerAddress] = useState('');
   const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
@@ -168,6 +177,12 @@ export const CustomerPicker: React.FC<CustomerPickerProps> = ({
       const balance = parseFloat(c.balance ?? 0) || 0;
       const lastVisit = c.last_visit || c.lastVisit || c.last_sale_at || null;
 
+      const shopName = String(c.shopName ?? c.shop_name ?? '').trim();
+      const marketName = String(c.marketName ?? c.market_name ?? '').trim();
+      const city = String(c.city ?? '').trim();
+      const creditLimit = parseFloat(c.creditLimit ?? c.credit_limit ?? 0) || 0;
+      const currentBalance = parseFloat(c.currentBalance ?? c.current_balance ?? c.balance ?? 0) || 0;
+
       return {
         raw: c,
         idStr,
@@ -176,12 +191,17 @@ export const CustomerPicker: React.FC<CustomerPickerProps> = ({
         nameLower,
         phoneClean,
         phoneLower,
+        shopName,
+        marketName,
+        city,
+        creditLimit,
+        currentBalance,
         loyaltyPoints,
         totalSpent,
         totalOrders,
         balance,
         lastVisit,
-        searchBlob: `${nameLower} ${phoneLower} ${phoneClean} #${idStr} ${idStr} ${codeStr}`,
+        searchBlob: `${nameLower} ${phoneLower} ${phoneClean} #${idStr} ${idStr} ${codeStr} ${shopName.toLowerCase()} ${marketName.toLowerCase()} ${city.toLowerCase()}`,
       };
     });
   }, [customers]);
@@ -385,6 +405,8 @@ export const CustomerPicker: React.FC<CustomerPickerProps> = ({
       const res = await api.customers.create({
         name: toTitleCaseTrimmed(newCustomerName),
         phone: newCustomerPhone.trim(),
+        shopName: toTitleCaseTrimmed(newCustomerShop) || undefined,
+        city: toTitleCaseTrimmed(newCustomerCity) || undefined,
         address: toTitleCaseTrimmed(newCustomerAddress) || 'Walk-in Counter',
       });
       const created: Customer = {
@@ -397,6 +419,8 @@ export const CustomerPicker: React.FC<CustomerPickerProps> = ({
       onCustomerCreated(created);
       onSelectCustomer(created.id);
       setNewCustomerName('');
+      setNewCustomerShop('');
+      setNewCustomerCity('');
       setNewCustomerPhone('');
       setNewCustomerAddress('');
       setIsQuickAddOpen(false);
@@ -536,7 +560,7 @@ export const CustomerPicker: React.FC<CustomerPickerProps> = ({
           )}
           <input
             type="text"
-            placeholder="Customer Name *"
+            placeholder={isWholesaleStore ? "Dealer Contact Name *" : "Customer Name *"}
             value={newCustomerName}
             onChange={(e) => setNewCustomerName(toTitleCaseLive(e.target.value))}
             className="capitalize app-input w-full px-3 py-2 text-xs"
@@ -544,16 +568,32 @@ export const CustomerPicker: React.FC<CustomerPickerProps> = ({
             required
           />
           <input
-            type="tel"
-            placeholder="Mobile / Phone *"
-            value={newCustomerPhone}
-            onChange={(e) => setNewCustomerPhone(e.target.value)}
-            className="app-input w-full px-3 py-2 text-xs font-mono"
-            required
+            type="text"
+            placeholder="Shop / Business Name (e.g. Bismillah Shoe Palace)"
+            value={newCustomerShop}
+            onChange={(e) => setNewCustomerShop(toTitleCaseLive(e.target.value))}
+            className="capitalize app-input w-full px-3 py-1.5 text-xs"
           />
+          <div className="grid grid-cols-2 gap-1.5">
+            <input
+              type="tel"
+              placeholder="Mobile / Phone *"
+              value={newCustomerPhone}
+              onChange={(e) => setNewCustomerPhone(e.target.value)}
+              className="app-input w-full px-3 py-1.5 text-xs font-mono"
+              required
+            />
+            <input
+              type="text"
+              placeholder="City / Market (e.g. Lahore)"
+              value={newCustomerCity}
+              onChange={(e) => setNewCustomerCity(toTitleCaseLive(e.target.value))}
+              className="capitalize app-input w-full px-3 py-1.5 text-xs"
+            />
+          </div>
           <input
             type="text"
-            placeholder="Address / Area (optional)"
+            placeholder="Address / Market Area (optional)"
             value={newCustomerAddress}
             onChange={(e) => setNewCustomerAddress(toTitleCaseLive(e.target.value))}
             className="capitalize app-input w-full px-3 py-1.5 text-xs"
@@ -563,7 +603,7 @@ export const CustomerPicker: React.FC<CustomerPickerProps> = ({
             disabled={isCreatingCustomer}
             className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer active:scale-95 disabled:opacity-50"
           >
-            {isCreatingCustomer ? 'Saving Customer...' : 'Save & Add Customer'}
+            {isCreatingCustomer ? 'Saving Customer...' : isWholesaleStore ? 'Save & Select Dealer' : 'Save & Add Customer'}
           </button>
         </form>
       ) : (
@@ -592,12 +632,14 @@ export const CustomerPicker: React.FC<CustomerPickerProps> = ({
                   isInputFocused
                     ? searchQuery
                     : selectedCustomer
-                    ? `${selectedCustomer.raw.name} (${selectedCustomer.raw.phone})`
+                    ? `${selectedCustomer.raw.name}${selectedCustomer.shopName ? ` [${selectedCustomer.shopName}]` : ''} (${selectedCustomer.raw.phone})`
                     : searchQuery
                 }
                 placeholder={
                   selectedCustomer
-                    ? `${selectedCustomer.raw.name} (${selectedCustomer.raw.phone}) — Type to change...`
+                    ? `${selectedCustomer.raw.name}${selectedCustomer.shopName ? ` [${selectedCustomer.shopName}]` : ''} (${selectedCustomer.raw.phone}) — Type to change...`
+                    : isWholesaleStore
+                    ? 'Search Dealer / Shop Name, City, Phone...'
                     : 'Walk-in / Cash Customer (Type name, phone, #ID...)'
                 }
                 onFocus={() => {
@@ -729,13 +771,26 @@ export const CustomerPicker: React.FC<CustomerPickerProps> = ({
                                     <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/50 font-mono">
                                       {item.displayCode}
                                     </span>
+                                    {item.shopName && (
+                                      <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50">
+                                        🏪 {item.shopName}
+                                      </span>
+                                    )}
                                   </div>
-                                  <div className="flex items-center gap-2 mt-0.5 text-[10.5px] text-slate-500 dark:text-slate-400 font-mono">
+                                  <div className="flex items-center gap-2 mt-0.5 text-[10.5px] text-slate-500 dark:text-slate-400 font-mono flex-wrap">
                                     <span>Phone: {item.raw.phone}</span>
+                                    {item.city && <span>• City: {item.city}</span>}
                                     {item.lastVisit && (
                                       <span>• Last: {formatLastVisitDate(item.lastVisit)}</span>
                                     )}
                                   </div>
+                                  {item.currentBalance > 0 && (
+                                    <div className="mt-1">
+                                      <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60">
+                                        Khata Balance: {currencySymbol} {formatStockPrice(item.currentBalance)}
+                                      </span>
+                                    </div>
+                                  )}
                                 </div>
 
                                 <div className="shrink-0 text-right">

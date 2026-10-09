@@ -83,6 +83,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({
   const currencySymbol = companySettings?.currencySymbol || 'Rs.';
   const rawPricingPolicy = String(companySettings?.pricingPolicy || 'FIXED').toUpperCase();
   const isFixedPolicy = rawPricingPolicy === 'FIXED';
+  const isWholesaleStore = String(companySettings?.businessType || companySettings?.business_type || '').toUpperCase() === 'WHOLESALE';
   const isAdmin = currentUser?.role === 'ADMIN';
 
   useEffect(() => {
@@ -647,63 +648,105 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({
 
                       {/* Cost Price & Selling Price with Policy Badge */}
                       <td className="py-3.5 px-3 text-right">
-                        <div className="font-mono font-bold text-slate-900 dark:text-white text-xs">
-                          {currencySymbol} {formatStockPrice(p.costPrice ?? p.cost_price)}
-                          <span className="text-[10px] text-slate-400 font-normal ml-1">cost</span>
-                        </div>
-                        {(() => {
-                          const retailPrice = getProductRetailPrice(p, companySettings);
-                          const minFloor = getProductMinFloorPrice(p, companySettings);
+                        {isWholesaleStore ? (
+                          <div className="flex flex-col items-end space-y-0.5">
+                            <div className="font-mono font-black text-indigo-600 dark:text-indigo-400 text-xs">
+                              {currencySymbol} {formatStockPrice(p.wholesalePrice ?? p.wholesale_price ?? p.sellingPrice ?? p.selling_price)}
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal ml-0.5">/pair</span>
+                            </div>
+                            <div className="font-mono font-bold text-purple-600 dark:text-purple-400 text-[11px]">
+                              {currencySymbol} {formatStockPrice(p.cartonPrice ?? p.carton_price ?? ((p.wholesalePrice ?? p.sellingPrice ?? 0) * (p.pairsPerCarton || 12)))}
+                              <span className="text-[9px] text-slate-400 font-normal ml-0.5">/ctn ({p.pairsPerCarton || 12} pr)</span>
+                            </div>
+                            <div className="font-mono text-slate-500 dark:text-slate-400 text-[10px]">
+                              {currencySymbol} {formatStockPrice(p.costPrice ?? p.cost_price)} cost
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="font-mono font-bold text-slate-900 dark:text-white text-xs">
+                              {currencySymbol} {formatStockPrice(p.costPrice ?? p.cost_price)}
+                              <span className="text-[10px] text-slate-400 font-normal ml-1">cost</span>
+                            </div>
+                            {(() => {
+                              const retailPrice = getProductRetailPrice(p, companySettings);
+                              const minFloor = getProductMinFloorPrice(p, companySettings);
 
-                          return isFixedPolicy ? (
-                            <div className="flex items-center justify-end gap-1 mt-0.5">
-                              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-100 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60 uppercase">
-                                Fixed
-                              </span>
-                              <span className="text-[11px] font-mono font-bold text-purple-600 dark:text-purple-400">
-                                {currencySymbol} {formatStockPrice(retailPrice)}
-                              </span>
-                            </div>
-                          ) : (
-                            <div className="flex flex-col items-end mt-0.5">
-                              <div className="flex items-center gap-1">
-                                <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-indigo-100 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 uppercase">
-                                  Max
-                                </span>
-                                <span className="text-[11px] font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                                  {currencySymbol} {formatStockPrice(retailPrice)}
-                                </span>
-                              </div>
-                              <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400 font-semibold">
-                                Min: {currencySymbol} {formatStockPrice(minFloor)}
-                              </span>
-                            </div>
-                          );
-                        })()}
+                              return isFixedPolicy ? (
+                                <div className="flex items-center justify-end gap-1 mt-0.5">
+                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-100 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60 uppercase">
+                                    Fixed
+                                  </span>
+                                  <span className="text-[11px] font-mono font-bold text-purple-600 dark:text-purple-400">
+                                    {currencySymbol} {formatStockPrice(retailPrice)}
+                                  </span>
+                                </div>
+                              ) : (
+                                <div className="flex flex-col items-end mt-0.5">
+                                  <div className="flex items-center gap-1">
+                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-indigo-100 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 uppercase">
+                                      Max
+                                    </span>
+                                    <span className="text-[11px] font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                                      {currencySymbol} {formatStockPrice(retailPrice)}
+                                    </span>
+                                  </div>
+                                  <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400 font-semibold">
+                                    Min: {currencySymbol} {formatStockPrice(minFloor)}
+                                  </span>
+                                </div>
+                              );
+                            })()}
+                          </>
+                        )}
                       </td>
 
                       {/* Total Stock */}
                       <td className="py-3.5 px-3 text-center">
-                        <span
-                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
-                            isOutOfStock
-                              ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800/60'
-                              : isLowStock
-                              ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60'
-                              : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60'
-                          }`}
-                        >
-                          {p.totalStock} pairs
-                        </span>
-                        {isLowStock && !isOutOfStock && (
-                          <div className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold mt-0.5">
-                            Low stock (≤{p.lowStockLimit})
+                        {isWholesaleStore ? (
+                          <div className="flex flex-col items-center">
+                            <span
+                              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                                isOutOfStock
+                                  ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800/60'
+                                  : isLowStock
+                                  ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60'
+                                  : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60'
+                              }`}
+                            >
+                              {Math.floor(p.totalStock / (p.pairsPerCarton || 12))} Cartons
+                            </span>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
+                              ({p.totalStock} pairs)
+                            </span>
+                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 mt-0.5">
+                              Min {p.minOrderCartons || 1} Ctn
+                            </span>
                           </div>
-                        )}
-                        {isOutOfStock && (
-                          <div className="text-[10px] text-rose-600 dark:text-rose-400 font-bold mt-0.5">
-                            OUT OF STOCK
-                          </div>
+                        ) : (
+                          <>
+                            <span
+                              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                                isOutOfStock
+                                  ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800/60'
+                                  : isLowStock
+                                  ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60'
+                                  : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60'
+                              }`}
+                            >
+                              {p.totalStock} pairs
+                            </span>
+                            {isLowStock && !isOutOfStock && (
+                              <div className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold mt-0.5">
+                                Low stock (≤{p.lowStockLimit})
+                              </div>
+                            )}
+                            {isOutOfStock && (
+                              <div className="text-[10px] text-rose-600 dark:text-rose-400 font-bold mt-0.5">
+                                OUT OF STOCK
+                              </div>
+                            )}
+                          </>
                         )}
                       </td>
 

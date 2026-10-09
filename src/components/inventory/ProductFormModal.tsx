@@ -136,6 +136,32 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     setTotalStock(newSize);
   };
 
+  // Business Type & Wholesale Configuration
+  const isWholesaleStore =
+    String(effectiveSettings?.businessType || effectiveSettings?.business_type || '').toUpperCase() === 'WHOLESALE';
+
+  const defaultCartonPairs = Number(
+    effectiveSettings?.defaultPairsPerCarton || effectiveSettings?.default_pairs_per_carton || 12
+  );
+
+  const [pairsPerCarton, setPairsPerCarton] = useState<number>(() => {
+    if (product?.pairsPerCarton || product?.pairs_per_carton) {
+      return Math.max(1, Number(product?.pairsPerCarton || product?.pairs_per_carton));
+    }
+    return defaultCartonPairs > 0 ? defaultCartonPairs : 12;
+  });
+
+  const [minOrderCartons, setMinOrderCartons] = useState<number>(() => {
+    if (product?.minOrderCartons || product?.min_order_cartons) {
+      return Math.max(1, Number(product?.minOrderCartons || product?.min_order_cartons));
+    }
+    return 1;
+  });
+
+  const [cartonBarcode, setCartonBarcode] = useState<string>(
+    product?.cartonBarcode || product?.carton_barcode || ''
+  );
+
   // Step 2: Pricing Specifications State (Integer values only, no decimals)
   // Uses global locked pricing policy configured in Installation Wizard / Settings
   const pricingPolicy: PricingPolicy = (
@@ -152,7 +178,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     return '';
   };
 
-  // Cost Price (mandatory for both FIXED and NEGOTIABLE)
+  // Cost Price (mandatory for both Retail and Wholesale)
   const [costPrice, setCostPrice] = useState<number | ''>(() =>
     parseInitialPrice(product?.costPrice ?? product?.cost_price)
   );
@@ -169,7 +195,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     )
   );
 
-  // Max Selling Price (used for NEGOTIABLE policy)
+  // Max Selling Price (used for NEGOTIABLE policy or fixed retail price)
   const [maxPrice, setMaxPrice] = useState<number | ''>(() =>
     parseInitialPrice(
       product?.maxPrice ??
@@ -180,6 +206,80 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       product?.selling_price
     )
   );
+
+  // Wholesale Selling Rate per Pair (e.g. Rs. 1,800 / pair)
+  const [wholesalePrice, setWholesalePrice] = useState<number | ''>(() => {
+    const raw =
+      product?.wholesalePrice ??
+      product?.wholesale_price ??
+      product?.sellingPrice ??
+      product?.selling_price ??
+      product?.maxPrice ??
+      product?.max_price;
+    return parseInitialPrice(raw);
+  });
+
+  // Wholesale Carton Price (auto-calculated: wholesalePrice * pairsPerCarton, or explicit)
+  const [cartonPrice, setCartonPrice] = useState<number | ''>(() => {
+    const rawCp = product?.cartonPrice ?? product?.carton_price;
+    if (rawCp !== undefined && rawCp !== null && rawCp !== '') {
+      return parseInitialPrice(rawCp);
+    }
+    const wp = parseInitialPrice(
+      product?.wholesalePrice ?? product?.wholesale_price ?? product?.sellingPrice ?? product?.selling_price
+    );
+    const ppc = product?.pairsPerCarton || product?.pairs_per_carton || defaultCartonPairs || 12;
+    return typeof wp === 'number' ? Math.round(wp * ppc) : '';
+  });
+
+  // Two-way synchronization between Wholesale Rate per Pair and Carton Price
+  const handleWholesalePriceChange = (valStr: string) => {
+    setErrorMessage(null);
+    const cleaned = cleanStockPriceInput(valStr);
+    if (cleaned === '') {
+      setWholesalePrice('');
+      setCartonPrice('');
+      setMaxPrice('');
+      setMinPrice('');
+      return;
+    }
+    const num = parseInt(cleaned, 10);
+    if (!isNaN(num)) {
+      setWholesalePrice(num);
+      setMaxPrice(num);
+      setMinPrice(num);
+      setCartonPrice(Math.round(num * (pairsPerCarton || 12)));
+    }
+  };
+
+  const handleCartonPriceChange = (valStr: string) => {
+    setErrorMessage(null);
+    const cleaned = cleanStockPriceInput(valStr);
+    if (cleaned === '') {
+      setCartonPrice('');
+      setWholesalePrice('');
+      setMaxPrice('');
+      setMinPrice('');
+      return;
+    }
+    const num = parseInt(cleaned, 10);
+    if (!isNaN(num)) {
+      setCartonPrice(num);
+      const ppc = pairsPerCarton > 0 ? pairsPerCarton : 12;
+      const perPair = Math.round(num / ppc);
+      setWholesalePrice(perPair);
+      setMaxPrice(perPair);
+      setMinPrice(perPair);
+    }
+  };
+
+  const handlePairsPerCartonSelect = (newPairs: number) => {
+    const safePairs = Math.max(1, newPairs);
+    setPairsPerCarton(safePairs);
+    if (typeof wholesalePrice === 'number') {
+      setCartonPrice(Math.round(wholesalePrice * safePairs));
+    }
+  };
 
   const [pricingFieldErrors, setPricingFieldErrors] = useState<Record<string, string>>({});
 
@@ -580,12 +680,46 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       setErrorMessage('Total initial stock quantity must be 0 or greater.');
       return false;
     }
+    if (isWholesaleStore) {
+      if (!pairsPerCarton || pairsPerCarton < 1) {
+        setErrorMessage('Pairs per Carton must be at least 1.');
+        return false;
+      }
+      if (!minOrderCartons || minOrderCartons < 1) {
+        setErrorMessage('Minimum Order Cartons must be at least 1.');
+        return false;
+      }
+    }
     return true;
   };
 
   const validateStep2 = (): boolean => {
     setErrorMessage(null);
     setPricingFieldErrors({});
+
+    if (isWholesaleStore) {
+      if (costPrice === '') {
+        const msg = 'Cost Price per pair is required.';
+        setPricingFieldErrors({ costPrice: msg });
+        setErrorMessage(msg);
+        return false;
+      }
+      if (wholesalePrice === '') {
+        const msg = 'Wholesale Selling Rate per pair is required.';
+        setPricingFieldErrors({ wholesalePrice: msg });
+        setErrorMessage(msg);
+        return false;
+      }
+      const costNum = Number(costPrice);
+      const wholesaleNum = Number(wholesalePrice);
+      if (wholesaleNum < costNum) {
+        const msg = `Wholesale Selling Rate (${currencySymbol} ${wholesaleNum}) cannot be lower than Cost Price (${currencySymbol} ${costNum}).`;
+        setPricingFieldErrors({ wholesalePrice: msg });
+        setErrorMessage(msg);
+        return false;
+      }
+      return true;
+    }
 
     if (costPrice === '') {
       const msg = 'Cost Price is required.';
@@ -704,18 +838,37 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       return;
     }
 
-    const validation = validateAndNormalizeProductPricing({
-      pricingPolicy,
-      costPrice: Number(costPrice),
-      minPrice: pricingPolicy === 'NEGOTIABLE' ? Number(minPrice) : undefined,
-      maxPrice: Number(maxPrice),
-    });
+    let finalCostToSave = 0;
+    let finalMinToSave = 0;
+    let finalMaxToSave = 0;
+    let finalWholesaleRate = 0;
+    let finalCartonRate = 0;
 
-    if (!validation.success || !validation.data) {
-      setCurrentStep(2);
-      setPricingFieldErrors(validation.fieldErrors || {});
-      setErrorMessage(validation.error || 'Pricing validation failed.');
-      return;
+    if (isWholesaleStore) {
+      finalCostToSave = Number(costPrice);
+      finalWholesaleRate = typeof wholesalePrice === 'number' ? wholesalePrice : finalCostToSave;
+      finalCartonRate = typeof cartonPrice === 'number' ? cartonPrice : (finalWholesaleRate * (pairsPerCarton || 12));
+      finalMaxToSave = finalWholesaleRate;
+      finalMinToSave = pricingPolicy === 'NEGOTIABLE' && typeof minPrice === 'number' ? minPrice : finalWholesaleRate;
+    } else {
+      const validation = validateAndNormalizeProductPricing({
+        pricingPolicy,
+        costPrice: Number(costPrice),
+        minPrice: pricingPolicy === 'NEGOTIABLE' ? Number(minPrice) : undefined,
+        maxPrice: Number(maxPrice),
+      });
+
+      if (!validation.success || !validation.data) {
+        setCurrentStep(2);
+        setPricingFieldErrors(validation.fieldErrors || {});
+        setErrorMessage(validation.error || 'Pricing validation failed.');
+        return;
+      }
+      finalCostToSave = validation.data.costPrice;
+      finalMinToSave = validation.data.minPrice;
+      finalMaxToSave = validation.data.maxPrice;
+      finalWholesaleRate = finalMaxToSave;
+      finalCartonRate = finalMaxToSave * (pairsPerCarton || 12);
     }
 
     setIsSubmitting(true);
@@ -743,7 +896,6 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       }
 
       const finalBarcodeToSave = barcode.trim();
-      const normalizedPricing = validation.data;
 
       // Final store-wide uniqueness verification before saving (prevents race condition if user clicks Save during debounce)
       const [artSkuCheck, barcodeCheck] = await Promise.all([
@@ -786,7 +938,6 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       }
 
       // Consolidated Product Pricing Payload:
-      // Fixed pricing stores its single price in maxPrice; negotiable pricing uses minPrice and maxPrice.
       const payload = {
         name: toTitleCaseTrimmed(productName) || cleanArticle,
         brand: finalBrand,
@@ -794,11 +945,17 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         article: cleanArticle,
         sku: cleanSku,
         barcode: finalBarcodeToSave,
+        cartonBarcode: isWholesaleStore && cartonBarcode.trim() ? cartonBarcode.trim() : undefined,
         primaryImageUrl: primaryImageUrl.trim(),
         description: description.trim(),
-        costPrice: normalizedPricing.costPrice,
-        minPrice: normalizedPricing.minPrice,
-        maxPrice: normalizedPricing.maxPrice,
+        costPrice: finalCostToSave,
+        minPrice: finalMinToSave,
+        maxPrice: finalMaxToSave,
+        sellingPrice: finalMaxToSave,
+        wholesalePrice: isWholesaleStore ? finalWholesaleRate : undefined,
+        cartonPrice: isWholesaleStore ? finalCartonRate : undefined,
+        pairsPerCarton: isWholesaleStore ? (pairsPerCarton || 12) : 12,
+        minOrderCartons: isWholesaleStore ? (minOrderCartons || 1) : 1,
         totalStock: totalStock === '' ? 0 : Math.round(Number(totalStock)),
         lowStockLimit: product?.lowStockLimit !== undefined ? product.lowStockLimit : 5,
       };
@@ -1096,126 +1253,359 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
               {/* PHYSICAL INVENTORY & DETAILS */}
               <div className="bg-white dark:bg-gradient-to-b dark:from-[#131B2E]/90 dark:to-[#0A0E1A]/80 p-5 rounded-2xl border border-gray-200 dark:border-[#1A263D] shadow-xs dark:shadow-[0_0_20px_rgba(59,130,246,0.05)] space-y-4">
-                <h5 className="font-bold text-gray-800 dark:text-white text-xs uppercase tracking-wider flex items-center gap-2 pb-2 border-b border-gray-100 dark:border-slate-800">
-                  <Package className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" />
-                  <span>Physical Inventory &amp; Basic Specs</span>
-                </h5>
+                <div className="flex items-center justify-between pb-2 border-b border-gray-100 dark:border-slate-800">
+                  <h5 className="font-bold text-gray-800 dark:text-white text-xs uppercase tracking-wider flex items-center gap-2">
+                    <Package className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" />
+                    <span>{isWholesaleStore ? 'Wholesale Master Carton & Inventory Packaging' : 'Physical Inventory & Basic Specs'}</span>
+                  </h5>
+                  {isWholesaleStore && (
+                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 uppercase">
+                      B2B Carton Model
+                    </span>
+                  )}
+                </div>
 
-                {/* Stock Quantity */}
-                <div className="p-3.5 bg-indigo-50/70 dark:bg-gradient-to-br dark:from-slate-900 dark:via-indigo-950 dark:to-purple-950 border border-indigo-200/80 dark:border-indigo-600/40 rounded-xl space-y-2.5 shadow-sm">
-                  <label className="block font-bold text-indigo-950 dark:text-white text-xs">
-                    Total Available Stock Quantity (Pairs) <span className="text-red-500 dark:text-pink-400">*</span>
-                  </label>
-                  <div className="flex items-center space-x-1">
-                    <button
-                      type="button"
-                      onClick={() => setTotalStock((prev) => Math.max(0, (typeof prev === 'number' ? prev : 0) - lotSize))}
-                      className="w-8 h-8 rounded-lg border border-indigo-200 dark:border-indigo-400/40 bg-white dark:bg-white/10 hover:bg-indigo-100 dark:hover:bg-white/20 flex items-center justify-center font-bold text-indigo-950 dark:text-white text-sm transition active:scale-95 shadow-2xs cursor-pointer"
-                      title={`Decrease ${lotSize} pairs (1 Lot)`}
-                    >
-                      -
-                    </button>
-                    <input
-                      type="number"
-                      min="0"
-                      required
-                      value={totalStock}
-                      onChange={(e) => setTotalStock(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
-                      placeholder="0"
-                      className="flex-1 py-1.5 px-3 bg-white dark:bg-slate-950/80 border border-indigo-200 dark:border-indigo-400/40 rounded-lg font-mono font-bold text-center text-sm text-indigo-950 dark:text-white placeholder-indigo-300 dark:placeholder-white/40 outline-none focus:border-indigo-500 dark:focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-400/30 shadow-2xs"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setTotalStock((prev) => (typeof prev === 'number' ? prev : 0) + lotSize)}
-                      className="w-8 h-8 rounded-lg border border-indigo-200 dark:border-indigo-400/40 bg-white dark:bg-white/10 hover:bg-indigo-100 dark:hover:bg-white/20 flex items-center justify-center font-bold text-indigo-950 dark:text-white text-sm transition active:scale-95 shadow-2xs cursor-pointer"
-                      title={`Increase ${lotSize} pairs (1 Lot)`}
-                    >
-                      +
-                    </button>
-                  </div>
+                {isWholesaleStore ? (
+                  /* ========================================================= */
+                  /* WHOLESALE STORE: CARTON PACKAGING & STOCK CONTROLS        */
+                  /* ========================================================= */
+                  <div className="space-y-4">
+                    {/* 1. Pairs Per Carton & Minimum Order Cartons */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {/* Pairs per Carton */}
+                      <div className="p-3.5 bg-indigo-50/70 dark:bg-[#070B14] border border-indigo-200/80 dark:border-indigo-900/60 rounded-xl space-y-2 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <label className="block font-bold text-indigo-950 dark:text-white text-xs">
+                            Pairs Per Carton (Master Box) <span className="text-red-500">*</span>
+                          </label>
+                          <span className="text-[10px] font-mono text-indigo-600 dark:text-indigo-400 font-bold">pairs_per_carton</span>
+                        </div>
+                        <p className="text-[11px] text-indigo-900/70 dark:text-slate-400">
+                          Number of shoe pairs packed inside each wholesale carton box.
+                        </p>
+                        <div className="flex items-center space-x-1">
+                          <button
+                            type="button"
+                            onClick={() => handlePairsPerCartonSelect(Math.max(1, pairsPerCarton - 1))}
+                            className="w-8 h-8 rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-white dark:bg-white/10 hover:bg-indigo-100 dark:hover:bg-white/20 flex items-center justify-center font-bold text-indigo-950 dark:text-white text-sm transition active:scale-95 cursor-pointer shadow-2xs"
+                          >
+                            -
+                          </button>
+                          <input
+                            type="number"
+                            min="1"
+                            required
+                            value={pairsPerCarton}
+                            onChange={(e) => handlePairsPerCartonSelect(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                            className="flex-1 py-1.5 px-3 bg-white dark:bg-slate-950/80 border border-indigo-200 dark:border-indigo-500/30 rounded-lg font-mono font-black text-center text-sm text-indigo-950 dark:text-white outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 shadow-2xs"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handlePairsPerCartonSelect(pairsPerCarton + 1)}
+                            className="w-8 h-8 rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-white dark:bg-white/10 hover:bg-indigo-100 dark:hover:bg-white/20 flex items-center justify-center font-bold text-indigo-950 dark:text-white text-sm transition active:scale-95 cursor-pointer shadow-2xs"
+                          >
+                            +
+                          </button>
+                        </div>
+                        {/* Quick Presets */}
+                        <div className="flex flex-wrap items-center gap-1 pt-1">
+                          {[
+                            { val: 6, label: '6 (½ Doz)' },
+                            { val: 12, label: '12 (1 Doz)' },
+                            { val: 18, label: '18 Pairs' },
+                            { val: 24, label: '24 (2 Doz)' },
+                          ].map((chip) => (
+                            <button
+                              key={chip.val}
+                              type="button"
+                              onClick={() => handlePairsPerCartonSelect(chip.val)}
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold border transition cursor-pointer ${
+                                pairsPerCarton === chip.val
+                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-indigo-200/80 dark:border-indigo-900/60 hover:bg-indigo-50'
+                              }`}
+                            >
+                              {chip.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
 
-                  {/* Lot Size Selector & Dynamic Quick Chips */}
-                  <div className="pt-2 border-t border-indigo-200/60 dark:border-white/10">
-                    {/* Lot Option Toggle / Radio Group */}
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-[10px] font-bold text-indigo-900/80 dark:text-white uppercase tracking-wider">
-                        Lot Size
-                      </span>
-                      <div
-                        className="inline-flex p-0.5 bg-white/90 dark:bg-slate-950/70 border border-indigo-200 dark:border-indigo-400/30 rounded-lg"
-                        role="radiogroup"
-                        aria-label="Lot Size Selector"
-                      >
-                        <button
-                          type="button"
-                          role="radio"
-                          aria-checked={lotSize === 6}
-                          onClick={() => handleLotSizeChange(6)}
-                          className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
-                            lotSize === 6
-                              ? 'bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 text-white shadow-md shadow-indigo-500/30 font-extrabold border border-white/20'
-                              : 'text-slate-600 dark:text-white/80 hover:text-indigo-600 dark:hover:text-white border border-transparent'
-                          }`}
-                        >
-                          Lot 6
-                        </button>
-                        <button
-                          type="button"
-                          role="radio"
-                          aria-checked={lotSize === 8}
-                          onClick={() => handleLotSizeChange(8)}
-                          className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
-                            lotSize === 8
-                              ? 'bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 text-white shadow-md shadow-indigo-500/30 font-extrabold border border-white/20'
-                              : 'text-slate-600 dark:text-white/80 hover:text-indigo-600 dark:hover:text-white border border-transparent'
-                          }`}
-                        >
-                          Lot 8
-                        </button>
+                      {/* Minimum Order Limit (Cartons) */}
+                      <div className="p-3.5 bg-amber-50/70 dark:bg-[#070B14] border border-amber-200/80 dark:border-amber-900/60 rounded-xl space-y-2 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <label className="block font-bold text-amber-950 dark:text-white text-xs">
+                            Minimum Order Limit (Cartons) <span className="text-red-500">*</span>
+                          </label>
+                          <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400 font-bold">min_order_cartons</span>
+                        </div>
+                        <p className="text-[11px] text-amber-900/70 dark:text-slate-400">
+                          Minimum cartons dealer must buy. Blocks selling broken pairs below limit.
+                        </p>
+                        <div className="flex items-center space-x-1">
+                          <button
+                            type="button"
+                            onClick={() => setMinOrderCartons((prev) => Math.max(1, prev - 1))}
+                            className="w-8 h-8 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-white dark:bg-white/10 hover:bg-amber-100 dark:hover:bg-white/20 flex items-center justify-center font-bold text-amber-950 dark:text-white text-sm transition active:scale-95 cursor-pointer shadow-2xs"
+                          >
+                            -
+                          </button>
+                          <input
+                            type="number"
+                            min="1"
+                            required
+                            value={minOrderCartons}
+                            onChange={(e) => setMinOrderCartons(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                            className="flex-1 py-1.5 px-3 bg-white dark:bg-slate-950/80 border border-amber-200 dark:border-amber-500/30 rounded-lg font-mono font-black text-center text-sm text-amber-950 dark:text-white outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 shadow-2xs"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setMinOrderCartons((prev) => prev + 1)}
+                            className="w-8 h-8 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-white dark:bg-white/10 hover:bg-amber-100 dark:hover:bg-white/20 flex items-center justify-center font-bold text-amber-950 dark:text-white text-sm transition active:scale-95 cursor-pointer shadow-2xs"
+                          >
+                            +
+                          </button>
+                        </div>
+                        {/* Live Minimum Order Badge */}
+                        <div className="pt-1">
+                          <div className="p-1.5 bg-amber-100/80 dark:bg-amber-950/60 rounded-md border border-amber-300/80 dark:border-amber-800/60 text-[10px] font-bold text-amber-900 dark:text-amber-300 flex items-center justify-between">
+                            <span>Minimum Dealer Order:</span>
+                            <span className="font-mono underline">
+                              {minOrderCartons} {minOrderCartons === 1 ? 'Carton' : 'Cartons'} (= {minOrderCartons * pairsPerCarton} Pairs)
+                            </span>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Dynamic Quantity Chips */}
-                    <div className="flex flex-wrap items-center gap-1">
-                      {(lotSize === 6
-                        ? [
-                            { value: 6, label: '6', note: '1 Lot (6 pairs / ½ Dozen)' },
-                            { value: 12, label: '12', note: '2 Lots (12 pairs / 1 Dozen)' },
-                            { value: 24, label: '24', note: '4 Lots (24 pairs / 2 Dozens)' },
-                            { value: 60, label: '60', note: '10 Lots (60 pairs / 5 Dozens)' },
-                            { value: 120, label: '120', note: '20 Lots (120 pairs / 10 Dozens)' },
-                          ]
-                        : [
-                            { value: 8, label: '8', note: '1 Lot (8 pairs)' },
-                            { value: 16, label: '16', note: '2 Lots (16 pairs)' },
-                            { value: 32, label: '32', note: '4 Lots (32 pairs)' },
-                            { value: 40, label: '40', note: '5 Lots (40 pairs)' },
-                            { value: 80, label: '80', note: '10 Lots (80 pairs)' },
-                          ]
-                      ).map((chip) => (
-                        <button
-                          key={chip.value}
-                          type="button"
-                          title={chip.note}
-                          onClick={() => setTotalStock(chip.value)}
-                          className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold border transition active:scale-95 cursor-pointer ${
-                            totalStock === chip.value
-                              ? 'bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 text-white border-transparent shadow-md shadow-indigo-500/40 font-extrabold ring-2 ring-indigo-400 dark:ring-white/80'
-                              : 'bg-gradient-to-r from-purple-600/90 via-indigo-600/90 to-purple-700/90 hover:from-purple-600 hover:via-indigo-600 hover:to-purple-700 text-white border-purple-300/40 dark:border-indigo-400/40 shadow-xs font-bold'
-                          }`}
-                        >
-                          {chip.label}
-                        </button>
-                      ))}
+                    {/* 2. Total Stock Inventory (Cartons & Synchronized Pairs) */}
+                    <div className="p-4 bg-emerald-50/60 dark:bg-gradient-to-br dark:from-slate-900 dark:via-emerald-950/40 dark:to-slate-900 border border-emerald-200/80 dark:border-emerald-600/40 rounded-xl space-y-3 shadow-2xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <label className="block font-bold text-emerald-950 dark:text-white text-xs">
+                            Available Inventory Stock (Cartons) <span className="text-red-500">*</span>
+                          </label>
+                          <p className="text-[11px] text-emerald-900/80 dark:text-slate-400">
+                            Enter master cartons count. Pairs count auto-converts ({pairsPerCarton} pairs/carton).
+                          </p>
+                        </div>
+                        <div className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-mono font-bold text-xs shadow-xs">
+                          {totalStock === '' ? 0 : totalStock} Total Pairs Available
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                        {/* Cartons Counter */}
+                        <div>
+                          <span className="block text-[10px] font-bold uppercase tracking-wider text-emerald-900/80 dark:text-emerald-300 mb-1">
+                            Carton Boxes Count
+                          </span>
+                          <div className="flex items-center space-x-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const currentCtns = Math.floor((typeof totalStock === 'number' ? totalStock : 0) / pairsPerCarton);
+                                const nextCtns = Math.max(0, currentCtns - 1);
+                                setTotalStock(nextCtns * pairsPerCarton);
+                              }}
+                              className="w-9 h-9 rounded-lg border border-emerald-200 dark:border-emerald-500/40 bg-white dark:bg-white/10 hover:bg-emerald-100 dark:hover:bg-white/20 flex items-center justify-center font-bold text-emerald-950 dark:text-white text-sm transition active:scale-95 cursor-pointer shadow-2xs"
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              min="0"
+                              value={Math.floor((typeof totalStock === 'number' ? totalStock : 0) / pairsPerCarton)}
+                              onChange={(e) => {
+                                const ctns = Math.max(0, parseInt(e.target.value, 10) || 0);
+                                setTotalStock(ctns * pairsPerCarton);
+                              }}
+                              placeholder="0"
+                              className="flex-1 py-2 px-3 bg-white dark:bg-slate-950/80 border border-emerald-300 dark:border-emerald-500/40 rounded-lg font-mono font-black text-center text-base text-emerald-950 dark:text-white outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-200 shadow-2xs"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const currentCtns = Math.floor((typeof totalStock === 'number' ? totalStock : 0) / pairsPerCarton);
+                                setTotalStock((currentCtns + 1) * pairsPerCarton);
+                              }}
+                              className="w-9 h-9 rounded-lg border border-emerald-200 dark:border-emerald-500/40 bg-white dark:bg-white/10 hover:bg-emerald-100 dark:hover:bg-white/20 flex items-center justify-center font-bold text-emerald-950 dark:text-white text-sm transition active:scale-95 cursor-pointer shadow-2xs"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Direct Pairs Override / Fine Adjustment */}
+                        <div>
+                          <span className="block text-[10px] font-bold uppercase tracking-wider text-emerald-900/80 dark:text-emerald-300 mb-1">
+                            Direct Total Pairs (Exact)
+                          </span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={totalStock}
+                            onChange={(e) => setTotalStock(e.target.value === '' ? '' : Math.max(0, parseInt(e.target.value, 10) || 0))}
+                            placeholder="0"
+                            className="w-full py-2 px-3 bg-white dark:bg-slate-950/80 border border-emerald-300 dark:border-emerald-500/40 rounded-lg font-mono font-bold text-center text-sm text-emerald-950 dark:text-white outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-200 shadow-2xs"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Quick Carton Presets */}
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-emerald-200/60 dark:border-white/10">
+                        <span className="text-[10px] text-emerald-900/70 dark:text-slate-400 font-bold uppercase">Quick Cartons:</span>
+                        {[1, 5, 10, 20, 50, 100].map((ctn) => (
+                          <button
+                            key={`ctn-quick-${ctn}`}
+                            type="button"
+                            onClick={() => setTotalStock(ctn * pairsPerCarton)}
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold border transition cursor-pointer ${
+                              totalStock === ctn * pairsPerCarton
+                                ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                                : 'bg-white dark:bg-slate-900 text-emerald-900 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-100'
+                            }`}
+                          >
+                            {ctn} {ctn === 1 ? 'Ctn' : 'Ctns'} ({ctn * pairsPerCarton} pr)
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Master Carton Barcode (Optional) */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block font-semibold text-gray-700 dark:text-slate-300 text-xs">
+                          Master Carton Outer Box Barcode (Optional)
+                        </label>
+                        <span className="text-[10px] text-gray-400 font-mono">carton_barcode</span>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="Scan or enter outer carton box barcode (optional)..."
+                        value={cartonBarcode}
+                        onChange={(e) => setCartonBarcode(e.target.value.trim())}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-xl text-xs font-mono outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 bg-white dark:bg-[#070B14] text-gray-900 dark:text-white"
+                      />
                     </div>
                   </div>
+                ) : (
+                  /* ========================================================= */
+                  /* RETAIL STORE: STANDARD PAIR & LOT SIZE COUNTER            */
+                  /* ========================================================= */
+                  <div className="p-3.5 bg-indigo-50/70 dark:bg-gradient-to-br dark:from-slate-900 dark:via-indigo-950 dark:to-purple-950 border border-indigo-200/80 dark:border-indigo-600/40 rounded-xl space-y-2.5 shadow-sm">
+                    <label className="block font-bold text-indigo-950 dark:text-white text-xs">
+                      Total Available Stock Quantity (Pairs) <span className="text-red-500 dark:text-pink-400">*</span>
+                    </label>
+                    <div className="flex items-center space-x-1">
+                      <button
+                        type="button"
+                        onClick={() => setTotalStock((prev) => Math.max(0, (typeof prev === 'number' ? prev : 0) - lotSize))}
+                        className="w-8 h-8 rounded-lg border border-indigo-200 dark:border-indigo-400/40 bg-white dark:bg-white/10 hover:bg-indigo-100 dark:hover:bg-white/20 flex items-center justify-center font-bold text-indigo-950 dark:text-white text-sm transition active:scale-95 shadow-2xs cursor-pointer"
+                        title={`Decrease ${lotSize} pairs (1 Lot)`}
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        min="0"
+                        required
+                        value={totalStock}
+                        onChange={(e) => setTotalStock(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                        placeholder="0"
+                        className="flex-1 py-1.5 px-3 bg-white dark:bg-slate-950/80 border border-indigo-200 dark:border-indigo-400/40 rounded-lg font-mono font-bold text-center text-sm text-indigo-950 dark:text-white placeholder-indigo-300 dark:placeholder-white/40 outline-none focus:border-indigo-500 dark:focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-400/30 shadow-2xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setTotalStock((prev) => (typeof prev === 'number' ? prev : 0) + lotSize)}
+                        className="w-8 h-8 rounded-lg border border-indigo-200 dark:border-indigo-400/40 bg-white dark:bg-white/10 hover:bg-indigo-100 dark:hover:bg-white/20 flex items-center justify-center font-bold text-indigo-950 dark:text-white text-sm transition active:scale-95 shadow-2xs cursor-pointer"
+                        title={`Increase ${lotSize} pairs (1 Lot)`}
+                      >
+                        +
+                      </button>
+                    </div>
 
-                  <div className="pt-2 border-t border-indigo-200/60 dark:border-white/10">
-                    <p className="text-[10px] text-indigo-900/70 dark:text-white/80 font-medium">
-                      Direct physical shoe pair count for this product.
-                    </p>
+                    {/* Lot Size Selector & Dynamic Quick Chips */}
+                    <div className="pt-2 border-t border-indigo-200/60 dark:border-white/10">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[10px] font-bold text-indigo-900/80 dark:text-white uppercase tracking-wider">
+                          Lot Size
+                        </span>
+                        <div
+                          className="inline-flex p-0.5 bg-white/90 dark:bg-slate-950/70 border border-indigo-200 dark:border-indigo-400/30 rounded-lg"
+                          role="radiogroup"
+                          aria-label="Lot Size Selector"
+                        >
+                          <button
+                            type="button"
+                            role="radio"
+                            aria-checked={lotSize === 6}
+                            onClick={() => handleLotSizeChange(6)}
+                            className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                              lotSize === 6
+                                ? 'bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 text-white shadow-md shadow-indigo-500/30 font-extrabold border border-white/20'
+                                : 'text-slate-600 dark:text-white/80 hover:text-indigo-600 dark:hover:text-white border border-transparent'
+                            }`}
+                          >
+                            Lot 6
+                          </button>
+                          <button
+                            type="button"
+                            role="radio"
+                            aria-checked={lotSize === 8}
+                            onClick={() => handleLotSizeChange(8)}
+                            className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                              lotSize === 8
+                                ? 'bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 text-white shadow-md shadow-indigo-500/30 font-extrabold border border-white/20'
+                                : 'text-slate-600 dark:text-white/80 hover:text-indigo-600 dark:hover:text-white border border-transparent'
+                            }`}
+                          >
+                            Lot 8
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1">
+                        {(lotSize === 6
+                          ? [
+                              { value: 6, label: '6', note: '1 Lot (6 pairs / ½ Dozen)' },
+                              { value: 12, label: '12', note: '2 Lots (12 pairs / 1 Dozen)' },
+                              { value: 24, label: '24', note: '4 Lots (24 pairs / 2 Dozens)' },
+                              { value: 60, label: '60', note: '10 Lots (60 pairs / 5 Dozens)' },
+                              { value: 120, label: '120', note: '20 Lots (120 pairs / 10 Dozens)' },
+                            ]
+                          : [
+                              { value: 8, label: '8', note: '1 Lot (8 pairs)' },
+                              { value: 16, label: '16', note: '2 Lots (16 pairs)' },
+                              { value: 32, label: '32', note: '4 Lots (32 pairs)' },
+                              { value: 40, label: '40', note: '5 Lots (40 pairs)' },
+                              { value: 80, label: '80', note: '10 Lots (80 pairs)' },
+                            ]
+                        ).map((chip) => (
+                          <button
+                            key={chip.value}
+                            type="button"
+                            title={chip.note}
+                            onClick={() => setTotalStock(chip.value)}
+                            className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold border transition active:scale-95 cursor-pointer ${
+                              totalStock === chip.value
+                                ? 'bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 text-white border-transparent shadow-md shadow-indigo-500/40 font-extrabold ring-2 ring-indigo-400 dark:ring-white/80'
+                                : 'bg-gradient-to-r from-purple-600/90 via-indigo-600/90 to-purple-700/90 hover:from-purple-600 hover:via-indigo-600 hover:to-purple-700 text-white border-purple-300/40 dark:border-indigo-400/40 shadow-xs font-bold'
+                            }`}
+                          >
+                            {chip.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-indigo-200/60 dark:border-white/10">
+                      <p className="text-[10px] text-indigo-900/70 dark:text-white/80 font-medium">
+                        Direct physical shoe pair count for this product.
+                      </p>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Product Title / Display Name */}
                 <div>
@@ -1271,11 +1661,167 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 </div>
 
                 {/* ===================================================== */}
-                {/* DYNAMIC FORM: FIXED PRICE POLICY                      */}
-                {/* Renders Cost Price + Single "Price" Input             */}
-                {/* Fixed price is stored as maxPrice; negotiable policy uses minPrice and maxPrice. */}
+                {/* DYNAMIC PRICING FORM                                  */}
+                {/* WHOLESALE B2B: Cost per Pair + Wholesale Rate + Carton Price */}
+                {/* RETAIL B2C: Fixed or Negotiable Retail Pricing        */}
                 {/* ===================================================== */}
-                {pricingPolicy === 'FIXED' ? (
+                {isWholesaleStore ? (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      {/* 1. Cost Price per Pair */}
+                      <div className="p-4 bg-slate-50 dark:bg-[#070B14] border border-gray-200 dark:border-slate-800 rounded-2xl space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label htmlFor="wholesale-cost-price-input" className="block font-bold text-gray-900 dark:text-slate-200 text-xs">
+                            Cost Price (Per Pair) <span className="text-red-500">*</span>
+                          </label>
+                          <span className="text-[10px] font-mono text-gray-500 dark:text-slate-400">costPrice</span>
+                        </div>
+                        <p className="text-[11px] text-gray-500 dark:text-slate-400">
+                          Unit acquisition / factory cost per single pair.
+                        </p>
+                        <div className="relative">
+                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500 dark:text-slate-400 font-mono font-bold text-base">
+                            {currencySymbol}
+                          </span>
+                          <input
+                            id="wholesale-cost-price-input"
+                            type="number"
+                            min="0"
+                            step="1"
+                            required
+                            autoFocus
+                            placeholder="0"
+                            value={costPrice}
+                            onChange={(e) => handleIntegerPriceInput(e.target.value, setCostPrice, 'costPrice')}
+                            className={`w-full pl-12 pr-3 py-3 bg-white dark:bg-[#0B101D] border-2 rounded-xl font-mono font-black text-lg text-gray-950 dark:text-white outline-none transition shadow-xs ${
+                              pricingFieldErrors.costPrice
+                                ? 'border-red-400 dark:border-red-500 focus:border-red-600'
+                                : 'border-indigo-200 dark:border-indigo-800/80 focus:border-indigo-600'
+                            }`}
+                          />
+                        </div>
+                        {pricingFieldErrors.costPrice && (
+                          <p className="text-red-600 dark:text-red-400 text-[11px] font-medium mt-1">
+                            {pricingFieldErrors.costPrice}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* 2. Wholesale Selling Rate (Per Pair) */}
+                      <div className="p-4 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-800/60 rounded-2xl space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label htmlFor="wholesale-pair-rate-input" className="block font-bold text-indigo-950 dark:text-indigo-200 text-xs">
+                            Wholesale Rate (Per Pair) <span className="text-red-500">*</span>
+                          </label>
+                          <span className="text-[10px] font-mono text-indigo-700 dark:text-indigo-300 font-bold">
+                            wholesalePrice
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-indigo-800/80 dark:text-indigo-300/80">
+                          B2B selling rate per pair (auto-syncs with carton price).
+                        </p>
+                        <div className="relative">
+                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-indigo-700 dark:text-indigo-300 font-mono font-black text-base">
+                            {currencySymbol}
+                          </span>
+                          <input
+                            id="wholesale-pair-rate-input"
+                            type="number"
+                            min="0"
+                            step="1"
+                            required
+                            placeholder="0"
+                            value={wholesalePrice}
+                            onChange={(e) => handleWholesalePriceChange(e.target.value)}
+                            className={`w-full pl-12 pr-3 py-3 bg-white dark:bg-[#070B14] border-2 rounded-xl font-mono font-black text-lg text-indigo-950 dark:text-indigo-100 outline-none transition shadow-xs ${
+                              pricingFieldErrors.wholesalePrice
+                                ? 'border-red-400 dark:border-red-500 focus:border-red-600'
+                                : 'border-indigo-400 dark:border-indigo-500 focus:border-indigo-600'
+                            }`}
+                          />
+                        </div>
+                        {pricingFieldErrors.wholesalePrice && (
+                          <p className="text-red-600 dark:text-red-400 text-[11px] font-medium mt-1">
+                            {pricingFieldErrors.wholesalePrice}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* 3. Carton Price (Two-way auto-synced) */}
+                      <div className="p-4 bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/60 rounded-2xl space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label htmlFor="wholesale-carton-price-input" className="block font-bold text-purple-950 dark:text-purple-200 text-xs">
+                            Carton Price ({pairsPerCarton} Pairs) <span className="text-red-500">*</span>
+                          </label>
+                          <span className="text-[10px] font-mono text-purple-700 dark:text-purple-300 font-bold">
+                            cartonPrice
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-purple-800/80 dark:text-purple-300/80">
+                          {pairsPerCarton} pairs &times; rate/pair (modifying adjusts rate).
+                        </p>
+                        <div className="relative">
+                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-purple-700 dark:text-purple-300 font-mono font-black text-base">
+                            {currencySymbol}
+                          </span>
+                          <input
+                            id="wholesale-carton-price-input"
+                            type="number"
+                            min="0"
+                            step="1"
+                            required
+                            placeholder="0"
+                            value={cartonPrice}
+                            onChange={(e) => handleCartonPriceChange(e.target.value)}
+                            className="w-full pl-12 pr-3 py-3 bg-white dark:bg-[#070B14] border-2 rounded-xl font-mono font-black text-lg text-purple-950 dark:text-purple-100 outline-none transition shadow-xs border-purple-400 dark:border-purple-500 focus:border-purple-600"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Live Wholesale Profit & Batch Analytics Card */}
+                    {typeof costPrice === 'number' && typeof wholesalePrice === 'number' && wholesalePrice > 0 && (
+                      <div className="p-3.5 bg-gradient-to-r from-emerald-50 via-teal-50 to-indigo-50 dark:from-emerald-950/30 dark:via-slate-900 dark:to-indigo-950/30 border border-emerald-200/80 dark:border-emerald-700/60 rounded-xl space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-emerald-950 dark:text-emerald-300 flex items-center gap-1.5 uppercase tracking-wider">
+                            <TrendingUp className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                            <span>Wholesale Margin &amp; Carton Economics</span>
+                          </span>
+                          <span className="text-[11px] font-bold font-mono text-emerald-700 dark:text-emerald-400 bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+                            {costPrice > 0 ? `+${Math.round(((wholesalePrice - costPrice) / costPrice) * 100)}% Margin` : 'N/A'}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                          <div className="p-2 bg-white/80 dark:bg-slate-950/70 rounded-lg border border-emerald-200/60 dark:border-emerald-900/40">
+                            <span className="text-[10px] text-slate-500 block">Profit / Pair</span>
+                            <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300">
+                              {currencySymbol} {formatStockPrice(wholesalePrice - costPrice)}
+                            </span>
+                          </div>
+                          <div className="p-2 bg-white/80 dark:bg-slate-950/70 rounded-lg border border-emerald-200/60 dark:border-emerald-900/40">
+                            <span className="text-[10px] text-slate-500 block">Profit / Carton</span>
+                            <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300">
+                              {currencySymbol} {formatStockPrice((wholesalePrice - costPrice) * pairsPerCarton)}
+                            </span>
+                          </div>
+                          <div className="p-2 bg-white/80 dark:bg-slate-950/70 rounded-lg border border-emerald-200/60 dark:border-emerald-900/40">
+                            <span className="text-[10px] text-slate-500 block">Carton Sale Value</span>
+                            <span className="font-mono font-bold text-purple-700 dark:text-purple-300">
+                              {currencySymbol} {formatStockPrice(typeof cartonPrice === 'number' ? cartonPrice : wholesalePrice * pairsPerCarton)}
+                            </span>
+                          </div>
+                          <div className="p-2 bg-white/80 dark:bg-slate-950/70 rounded-lg border border-emerald-200/60 dark:border-emerald-900/40">
+                            <span className="text-[10px] text-slate-500 block">Total Batch Stock</span>
+                            <span className="font-mono font-bold text-indigo-700 dark:text-indigo-300">
+                              {currencySymbol} {formatStockPrice(wholesalePrice * (typeof totalStock === 'number' ? totalStock : 0))}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : pricingPolicy === 'FIXED' ? (
                   <div className="space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {/* Cost Price */}
@@ -1852,35 +2398,70 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               <div className="bg-white dark:bg-gradient-to-b dark:from-[#131B2E]/90 dark:to-[#0A0E1A]/80 p-5 rounded-2xl border border-gray-200 dark:border-[#1A263D] shadow-xs dark:shadow-[0_0_20px_rgba(59,130,246,0.05)] space-y-3">
                 <h5 className="font-bold text-gray-800 dark:text-white text-xs uppercase tracking-wider flex items-center gap-2 pb-2 border-b border-gray-100 dark:border-slate-800">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                  <span>Product Review Summary Before Saving</span>
+                  <span>{isWholesaleStore ? 'Wholesale Product Specifications Summary' : 'Product Review Summary Before Saving'}</span>
                 </h5>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                  <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#070B14] border border-gray-100 dark:border-slate-800">
-                    <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Brand &amp; Category</span>
-                    <span className="font-bold text-gray-900 dark:text-white truncate block">
-                      {currentBrandName || '---'} / {currentCategoryName || '---'}
-                    </span>
+                {isWholesaleStore ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                    <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#070B14] border border-gray-100 dark:border-slate-800">
+                      <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Brand &amp; Category</span>
+                      <span className="font-bold text-gray-900 dark:text-white truncate block">
+                        {currentBrandName || '---'} / {currentCategoryName || '---'}
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#070B14] border border-gray-100 dark:border-slate-800">
+                      <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Article / SKU</span>
+                      <span className="font-mono font-bold text-indigo-600 dark:text-blue-400 truncate block">
+                        {article || '---'} • {sku || '---'}
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#070B14] border border-gray-100 dark:border-slate-800">
+                      <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Rate / Carton Price</span>
+                      <span className="font-mono font-bold text-purple-700 dark:text-purple-300 truncate block">
+                        {currencySymbol} {formatStockPrice(wholesalePrice)}/pr • {currencySymbol} {formatStockPrice(cartonPrice)}/ctn
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#070B14] border border-gray-100 dark:border-slate-800">
+                      <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Cartons / Pairs</span>
+                      <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300 truncate block">
+                        {Math.floor((typeof totalStock === 'number' ? totalStock : 0) / (pairsPerCarton || 12))} Ctns ({totalStock} pr)
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#070B14] border border-gray-100 dark:border-slate-800">
+                      <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Min Dealer Order</span>
+                      <span className="font-mono font-bold text-amber-700 dark:text-amber-400 truncate block">
+                        {minOrderCartons} Ctn ({minOrderCartons * pairsPerCarton} pr)
+                      </span>
+                    </div>
                   </div>
-                  <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#070B14] border border-gray-100 dark:border-slate-800">
-                    <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Article / SKU</span>
-                    <span className="font-mono font-bold text-indigo-600 dark:text-blue-400 truncate block">
-                      {article || '---'} • {sku || '---'}
-                    </span>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#070B14] border border-gray-100 dark:border-slate-800">
+                      <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Brand &amp; Category</span>
+                      <span className="font-bold text-gray-900 dark:text-white truncate block">
+                        {currentBrandName || '---'} / {currentCategoryName || '---'}
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#070B14] border border-gray-100 dark:border-slate-800">
+                      <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Article / SKU</span>
+                      <span className="font-mono font-bold text-indigo-600 dark:text-blue-400 truncate block">
+                        {article || '---'} • {sku || '---'}
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#070B14] border border-gray-100 dark:border-slate-800">
+                      <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Cost / Max Sale Price</span>
+                      <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400 truncate block">
+                        {currencySymbol} {formatStockPrice(costPrice)} / {currencySymbol} {formatStockPrice(effectiveMaxSale)}
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#070B14] border border-gray-100 dark:border-slate-800">
+                      <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Total Stock</span>
+                      <span className="font-mono font-bold text-gray-900 dark:text-white truncate block">
+                        {totalStock === '' ? 0 : totalStock} Pairs
+                      </span>
+                    </div>
                   </div>
-                  <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#070B14] border border-gray-100 dark:border-slate-800">
-                    <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Cost / Max Sale Price</span>
-                    <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400 truncate block">
-                      {currencySymbol} {formatStockPrice(costPrice)} / {currencySymbol} {formatStockPrice(effectiveMaxSale)}
-                    </span>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#070B14] border border-gray-100 dark:border-slate-800">
-                    <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Total Stock</span>
-                    <span className="font-mono font-bold text-gray-900 dark:text-white truncate block">
-                      {totalStock === '' ? 0 : totalStock} Pairs
-                    </span>
-                  </div>
-                </div>
+                )}
               </div>
 
             </div>
