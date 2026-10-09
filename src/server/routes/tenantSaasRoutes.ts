@@ -389,17 +389,28 @@ router.post('/saas/store-requests', async (req: Request, res: Response) => {
       });
     }
 
+    const rawBusinessType = String(req.body.businessType || req.body.business_type || 'RETAIL').toUpperCase();
+    const finalBusinessType: 'RETAIL' | 'WHOLESALE' = rawBusinessType === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL';
+    const finalPricingMode: 'FIXED' | 'NEGOTIABLE' =
+      finalBusinessType === 'WHOLESALE'
+        ? 'FIXED'
+        : String(req.body.pricingPolicy || req.body.pricingMode || 'FIXED').toUpperCase() === 'NEGOTIABLE'
+        ? 'NEGOTIABLE'
+        : 'FIXED';
+
     let insertRes;
     try {
       insertRes = await pgClient.query<{ id: number }>(
-        `INSERT INTO store_requests (store_name, owner_email, owner_phone, plan, status)
-         VALUES ($1, $2, $3, $4, 'PENDING')
+        `INSERT INTO store_requests (store_name, owner_email, owner_phone, plan, business_type, pricing_mode, status)
+         VALUES ($1, $2, $3, $4, $5, $6, 'PENDING')
          RETURNING id`,
         [
           cleanStoreName,
           cleanOwnerEmail,
           cleanOwnerPhone,
           String(plan || 'PRO_TRIAL').trim(),
+          finalBusinessType,
+          finalPricingMode,
         ]
       );
     } catch (insertErr: any) {
@@ -429,18 +440,28 @@ router.post('/saas/store-requests', async (req: Request, res: Response) => {
               ALTER TABLE store_requests DROP COLUMN IF EXISTS subdomain CASCADE;
             EXCEPTION WHEN OTHERS THEN NULL;
             END;
+            BEGIN
+              ALTER TABLE store_requests ADD COLUMN IF NOT EXISTS business_type TEXT NOT NULL DEFAULT 'RETAIL';
+            EXCEPTION WHEN OTHERS THEN NULL;
+            END;
+            BEGIN
+              ALTER TABLE store_requests ADD COLUMN IF NOT EXISTS pricing_mode TEXT NOT NULL DEFAULT 'FIXED';
+            EXCEPTION WHEN OTHERS THEN NULL;
+            END;
           END $$;
         `).catch(() => {});
 
         insertRes = await pgClient.query<{ id: number }>(
-          `INSERT INTO store_requests (store_name, owner_email, owner_phone, plan, status)
-           VALUES ($1, $2, $3, $4, 'PENDING')
+          `INSERT INTO store_requests (store_name, owner_email, owner_phone, plan, business_type, pricing_mode, status)
+           VALUES ($1, $2, $3, $4, $5, $6, 'PENDING')
            RETURNING id`,
           [
             cleanStoreName,
             cleanOwnerEmail,
             cleanOwnerPhone,
             String(plan || 'PRO_TRIAL').trim(),
+            finalBusinessType,
+            finalPricingMode,
           ]
         );
       } else {
@@ -1175,6 +1196,8 @@ async function provisionNewTenantStore(params: {
   themeColor?: string;
   currency?: string;
   businessType?: 'RETAIL' | 'WHOLESALE';
+  pricingMode?: 'FIXED' | 'NEGOTIABLE';
+  pricingPolicy?: 'FIXED' | 'NEGOTIABLE';
   subscriptionPlan?: '6_MONTHS' | 'YEARLY' | string;
   subscriptionStartDate?: string;
   subscriptionEndDate?: string;
@@ -1201,6 +1224,12 @@ async function provisionNewTenantStore(params: {
   const currency = params.currency || 'PKR';
   const businessType: 'RETAIL' | 'WHOLESALE' =
     String(params.businessType || 'RETAIL').toUpperCase() === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL';
+  const pricingMode: 'FIXED' | 'NEGOTIABLE' =
+    businessType === 'WHOLESALE'
+      ? 'FIXED'
+      : String(params.pricingMode || params.pricingPolicy || 'FIXED').toUpperCase() === 'NEGOTIABLE'
+      ? 'NEGOTIABLE'
+      : 'FIXED';
   const subscriptionPlan = normalizeSubscriptionPlan(params.subscriptionPlan || 'YEARLY');
 
   const startDate = params.subscriptionStartDate ? new Date(params.subscriptionStartDate) : new Date();
@@ -1259,17 +1288,18 @@ async function provisionNewTenantStore(params: {
 
   const newTenant = tenantInsert.rows[0];
 
-  // Create isolated company_settings row for the new tenant (marked is_installed = false until Owner completes Initial Store Setup)
+  // Create isolated company_settings row for the new tenant (marked is_installed = false until Owner completes Initial Store Setup, pricing_policy_locked = true)
   await pgClient.query(
     `INSERT INTO company_settings (
       tenant_id, logo, address, phone, email, tax_id, tax_rate, currency, currency_symbol,
-      invoice_prefix, purchase_prefix, barcode_prefix, invoice_footer, pricing_mode, business_type, default_pairs_per_carton, wholesale_invoice_format, is_installed
-    ) VALUES ($1, '/pwa-512x512.png', '', $2, $3, '', 0, $4, 'Rs.', 'INV-', 'PUR-', '0108923', 'Thank you for shopping with us! Exchanges within 7 days with original receipt.', 'FIXED', $5, 12, 'A4', false)`,
+      invoice_prefix, purchase_prefix, barcode_prefix, invoice_footer, pricing_mode, business_type, default_pairs_per_carton, wholesale_invoice_format, is_installed, pricing_policy_locked
+    ) VALUES ($1, '/pwa-512x512.png', '', $2, $3, '', 0, $4, 'Rs.', 'INV-', 'PUR-', '0108923', 'Thank you for shopping with us! Exchanges within 7 days with original receipt.', $5, $6, 12, 'A4', false, true)`,
     [
       newTenant.id,
       (params.ownerPhone || '').trim(),
       params.ownerEmail.trim().toLowerCase(),
       currency,
+      pricingMode,
       businessType,
     ]
   );
@@ -1835,13 +1865,25 @@ router.post('/superadmin/store-requests/:id/approve', requireAuth, requireSuperA
       });
     }
 
+    const reqBusinessType: 'RETAIL' | 'WHOLESALE' =
+      String(req.body?.businessType || (storeReq as any).business_type || 'RETAIL').toUpperCase() === 'WHOLESALE'
+        ? 'WHOLESALE'
+        : 'RETAIL';
+    const reqPricingMode: 'FIXED' | 'NEGOTIABLE' =
+      reqBusinessType === 'WHOLESALE'
+        ? 'FIXED'
+        : String(req.body?.pricingMode || req.body?.pricingPolicy || (storeReq as any).pricing_mode || (storeReq as any).pricing_policy || 'FIXED').toUpperCase() === 'NEGOTIABLE'
+        ? 'NEGOTIABLE'
+        : 'FIXED';
+
     await pgClient.query('BEGIN');
     const provisioned = await provisionNewTenantStore({
       storeName: storeName && String(storeName).trim() ? String(storeName).trim() : storeReq.store_name,
       ownerEmail: storeReq.owner_email,
       ownerPhone: storeReq.owner_phone,
       password: password && String(password).trim() ? String(password).trim() : undefined,
-      businessType: req.body?.businessType || (storeReq as any).business_type || 'RETAIL',
+      businessType: reqBusinessType,
+      pricingMode: reqPricingMode,
       subscriptionPlan: req.body?.subscriptionPlan || (storeReq as any).plan || 'YEARLY',
     });
 
@@ -1995,6 +2037,8 @@ router.post('/superadmin/tenants', requireAuth, requireSuperAdmin, async (req: A
       themeColor,
       currency,
       businessType,
+      pricingMode,
+      pricingPolicy,
       subscriptionPlan,
       subscriptionStartDate,
       subscriptionEndDate,
@@ -2023,6 +2067,15 @@ router.post('/superadmin/tenants', requireAuth, requireSuperAdmin, async (req: A
       return res.status(400).json({ error: 'Owner password must be at least 4 characters.' });
     }
 
+    const rawBusinessType = String(businessType || 'RETAIL').toUpperCase();
+    const finalBusinessType: 'RETAIL' | 'WHOLESALE' = rawBusinessType === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL';
+    const finalPricingMode: 'FIXED' | 'NEGOTIABLE' =
+      finalBusinessType === 'WHOLESALE'
+        ? 'FIXED'
+        : String(pricingMode || pricingPolicy || 'FIXED').toUpperCase() === 'NEGOTIABLE'
+        ? 'NEGOTIABLE'
+        : 'FIXED';
+
     await pgClient.query('BEGIN');
     const provisioned = await provisionNewTenantStore({
       storeName,
@@ -2032,7 +2085,8 @@ router.post('/superadmin/tenants', requireAuth, requireSuperAdmin, async (req: A
       ownerPhone,
       themeColor,
       currency,
-      businessType: businessType || 'RETAIL',
+      businessType: finalBusinessType,
+      pricingMode: finalPricingMode,
       subscriptionPlan: subscriptionPlan || 'YEARLY',
       subscriptionStartDate,
       subscriptionEndDate,
@@ -2243,7 +2297,16 @@ router.post('/tenants/onboarding', requireAuth, requireAdmin, async (req: Reques
           'Thank you for shopping with us! Exchanges accepted within 7 days with original receipt.'
       ).trim();
     const finalLowStockLimit = Math.max(1, parseInt(String(lowStockLimit ?? 5), 10) || 5);
-    const finalPricingMode = String(pricingPolicy || 'FIXED').toUpperCase() === 'NEGOTIABLE' ? 'NEGOTIABLE' : 'FIXED';
+    const finalBusinessType: 'RETAIL' | 'WHOLESALE' =
+      String(req.body.businessType || req.body.business_type || (tenant as any).business_type || 'RETAIL').toUpperCase() === 'WHOLESALE'
+        ? 'WHOLESALE'
+        : 'RETAIL';
+    const finalPricingMode =
+      finalBusinessType === 'WHOLESALE'
+        ? 'FIXED'
+        : String(pricingPolicy || 'FIXED').toUpperCase() === 'NEGOTIABLE'
+        ? 'NEGOTIABLE'
+        : 'FIXED';
     const finalThemeColor = String(themeColor || '#7C3AED').trim();
     const finalBgColor = String(backgroundColor || '#0F172A').trim();
     const finalLogoUrl = String(logoUrl || '/pwa-512x512.png').trim();
@@ -2307,10 +2370,6 @@ router.post('/tenants/onboarding', requireAuth, requireAdmin, async (req: Reques
       }
     }
 
-    const finalBusinessType: 'RETAIL' | 'WHOLESALE' =
-      String(req.body.businessType || req.body.business_type || (tenant as any).business_type || 'RETAIL').toUpperCase() === 'WHOLESALE'
-        ? 'WHOLESALE'
-        : 'RETAIL';
     const finalDefaultPairs = Math.max(1, parseInt(String(req.body.defaultPairsPerCarton || req.body.default_pairs_per_carton || 12), 10) || 12);
     const finalWholesaleFormat = String(req.body.wholesaleInvoiceFormat || 'A4').toUpperCase() === 'A5' ? 'A5' : 'A4';
 

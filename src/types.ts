@@ -134,6 +134,8 @@ export interface StoreRequestRecord {
   ownerPhone: string;
   plan: string;
   businessType?: BusinessType;
+  pricingPolicy?: PricingPolicy;
+  pricingMode?: PricingPolicy;
   requestType?: string;
   notes?: string;
   provisionedTenantId?: number | null;

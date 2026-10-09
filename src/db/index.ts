@@ -453,20 +453,46 @@ async function executeMockQuery<T = any>(text: string, params: any[] = []): Prom
 
   if (upper.startsWith('INSERT INTO TENANTS')) {
     const hasExplicitId = params.length >= 7;
+    const hasBusinessType = upper.includes('BUSINESS_TYPE');
     const usedIds = new Set(mockStore.tenants.map((t) => Number(t.id)));
     let recycledId = 1;
     while (usedIds.has(recycledId)) {
       recycledId++;
     }
+    const tenantId = hasExplicitId ? Number(params[0]) || recycledId : recycledId;
+    const tenantName = String((hasExplicitId ? params[1] : params[0]) || 'New Shoe Store').trim();
+    let bType = 'RETAIL';
+    let subPlan = 'YEARLY';
+    let subStart = new Date().toISOString();
+    let subEnd = new Date(Date.now() + 86400000 * 365).toISOString();
+    let subStatus = 'ACTIVE';
+    let tColor = '#7C3AED';
+
+    if (hasExplicitId && hasBusinessType) {
+      bType = String(params[2] || 'RETAIL').toUpperCase() === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL';
+      subPlan = String(params[3] || 'YEARLY');
+      subStart = params[4] || subStart;
+      subEnd = params[5] || subEnd;
+      subStatus = String(params[6] || 'ACTIVE');
+      tColor = String(params[7] || '#7C3AED');
+    } else if (hasExplicitId) {
+      subPlan = String(params[2] || 'YEARLY');
+      subStart = params[3] || subStart;
+      subEnd = params[4] || subEnd;
+      subStatus = String(params[5] || 'ACTIVE');
+      tColor = String(params[6] || '#7C3AED');
+    }
+
     const newTenant = {
-      id: hasExplicitId ? Number(params[0]) || recycledId : recycledId,
-      name: String((hasExplicitId ? params[1] : params[0]) || 'New Shoe Store').trim(),
+      id: tenantId,
+      name: tenantName,
       status: 'ACTIVE',
-      subscription_plan: String((hasExplicitId ? params[2] : params[1]) || 'YEARLY'),
-      subscription_start_date: (hasExplicitId ? params[3] : params[2]) || new Date().toISOString(),
-      subscription_end_date: (hasExplicitId ? params[4] : params[3]) || new Date(Date.now() + 86400000 * 365).toISOString(),
-      subscription_status: String((hasExplicitId ? params[5] : params[4]) || 'ACTIVE'),
-      theme_color: String((hasExplicitId ? params[6] : params[5]) || '#7C3AED'),
+      business_type: bType,
+      subscription_plan: subPlan,
+      subscription_start_date: subStart,
+      subscription_end_date: subEnd,
+      subscription_status: subStatus,
+      theme_color: tColor,
       background_color: '#0F172A',
       logo_url: '/pwa-512x512.png',
       address: '',
@@ -532,6 +558,9 @@ async function executeMockQuery<T = any>(text: string, params: any[] = []): Prom
       tenant.name = String(params[0] || tenant.name);
       tenant.theme_color = String(params[1] || tenant.theme_color);
       tenant.background_color = String(params[2] || tenant.background_color);
+      if (upper.includes('BUSINESS_TYPE = $4')) {
+        tenant.business_type = String(params[3] || 'RETAIL').toUpperCase() === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL';
+      }
       tenant.status = 'ACTIVE';
       tenant.onboarding_completed = true;
     } else if (upper.includes('SET SUBSCRIPTION_PLAN = $1') && params.length === 5) {
@@ -586,15 +615,26 @@ async function executeMockQuery<T = any>(text: string, params: any[] = []): Prom
   }
 
   if (upper.startsWith('INSERT INTO STORE_REQUESTS')) {
+    let bType = 'RETAIL';
+    let pMode = 'FIXED';
+    if (upper.includes('BUSINESS_TYPE') && upper.includes('PRICING_MODE')) {
+      bType = String(params[4] || 'RETAIL').toUpperCase() === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL';
+      pMode = bType === 'WHOLESALE' ? 'FIXED' : (String(params[5] || 'FIXED').toUpperCase() === 'NEGOTIABLE' ? 'NEGOTIABLE' : 'FIXED');
+    } else if (upper.includes('BUSINESS_TYPE')) {
+      bType = String(params[4] || 'RETAIL').toUpperCase() === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL';
+      pMode = bType === 'WHOLESALE' ? 'FIXED' : 'FIXED';
+    }
     const newReq = {
       id: nextMockId('store_requests'),
       store_name: String(params[0] || '').trim(),
       owner_email: String(params[1] || '').trim().toLowerCase(),
       owner_phone: String(params[2] || '').trim(),
       plan: String(params[3] || 'YEARLY').trim(),
+      business_type: bType,
+      pricing_mode: pMode,
       request_type: upper.includes("'RENEWAL'") ? 'RENEWAL' : 'NEW_STORE',
-      notes: params.length > 4 ? String(params[4] || '') : '',
-      provisioned_tenant_id: params.length > 5 ? Number(params[5]) || null : null,
+      notes: params.length > 6 ? String(params[6] || '') : '',
+      provisioned_tenant_id: null,
       status: 'PENDING',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

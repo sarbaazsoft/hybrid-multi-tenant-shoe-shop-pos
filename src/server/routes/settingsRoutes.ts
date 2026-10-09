@@ -555,10 +555,15 @@ router.put('/', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res
         tenantLockRow?.onboarding_completed
     );
 
-    let pricingMode = String(currentRow?.pricing_mode || 'FIXED').toUpperCase() === 'NEGOTIABLE' ? 'NEGOTIABLE' : 'FIXED';
+    // Core business type, pricing policy, and document prefixes (invoice_prefix, purchase_prefix) are strictly locked once established
+    let pricingMode = currentRow?.pricing_mode
+      ? String(currentRow.pricing_mode).toUpperCase() === 'NEGOTIABLE'
+        ? 'NEGOTIABLE'
+        : 'FIXED'
+      : 'FIXED';
 
     const requestedMode = req.body.pricingPolicy || req.body.pricing_policy || req.body.pricing_mode || req.body.pricingMode;
-    if (requestedMode && !isSetupAlreadyLocked) {
+    if (requestedMode && !currentRow?.pricing_mode && !isSetupAlreadyLocked) {
       pricingMode = String(requestedMode).toUpperCase() === 'NEGOTIABLE' ? 'NEGOTIABLE' : 'FIXED';
     }
 
@@ -566,8 +571,9 @@ router.put('/', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res
     const finalCurrencyName = isSetupAlreadyLocked && currentRow?.currency_name ? currentRow.currency_name : currencyName;
     const finalCurrencySymbol = isSetupAlreadyLocked && currentRow?.currency_symbol ? currentRow.currency_symbol : currencySymbol;
     const finalBarcodePrefix = isSetupAlreadyLocked && currentRow?.barcode_prefix ? currentRow.barcode_prefix : barcodePrefix;
-    const finalPurchasePrefix = isSetupAlreadyLocked && currentRow?.purchase_prefix ? currentRow.purchase_prefix : purchasePrefix;
-    const finalInvoicePrefix = isSetupAlreadyLocked && currentRow?.invoice_prefix ? currentRow.invoice_prefix : invoicePrefix;
+    // Invoice Prefix and Purchase Prefix are locked and unchangeable once store is created/approved
+    const finalPurchasePrefix = currentRow?.purchase_prefix ? currentRow.purchase_prefix : purchasePrefix;
+    const finalInvoicePrefix = currentRow?.invoice_prefix ? currentRow.invoice_prefix : invoicePrefix;
 
     if (!companyName) {
       return res.status(400).json({ error: 'company_name is required.' });

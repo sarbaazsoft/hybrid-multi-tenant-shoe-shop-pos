@@ -45,6 +45,8 @@ export const SaasLandingPageAlternate: React.FC<Props> = ({ availableTenants, on
   const [ownerEmail, setOwnerEmail] = useState('');
   const [ownerPhone, setOwnerPhone] = useState('');
   const [plan, setPlan] = useState('1_YEAR_RS_18000');
+  const [businessType, setBusinessType] = useState<'RETAIL' | 'WHOLESALE'>('RETAIL');
+  const [pricingPolicy, setPricingPolicy] = useState<'FIXED' | 'NEGOTIABLE'>('FIXED');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -173,6 +175,8 @@ export const SaasLandingPageAlternate: React.FC<Props> = ({ availableTenants, on
     setStoreNameTouched(false);
     setEmailTouched(false);
     setPhoneTouched(false);
+    setBusinessType('RETAIL');
+    setPricingPolicy('FIXED');
     setRequestOpen(true);
   };
 
@@ -189,8 +193,12 @@ export const SaasLandingPageAlternate: React.FC<Props> = ({ availableTenants, on
     setError('');
     try {
       const result = await api.saas.submitStoreRequest({
-        storeName: toTitleCaseTrimmed(storeName), ownerEmail: toLowerTrimmed(ownerEmail),
-        ownerPhone: ownerPhone.trim(), plan,
+        storeName: toTitleCaseTrimmed(storeName),
+        ownerEmail: toLowerTrimmed(ownerEmail),
+        ownerPhone: ownerPhone.trim(),
+        plan,
+        businessType,
+        pricingPolicy: businessType === 'WHOLESALE' ? 'FIXED' : pricingPolicy,
       });
       if (result.superAdminEmail) {
         setSuperAdminEmail(result.superAdminEmail);
@@ -199,9 +207,16 @@ export const SaasLandingPageAlternate: React.FC<Props> = ({ availableTenants, on
         setSuperAdminPhone(result.superAdminPhone);
       }
       setSuccess(result.message);
-      setStoreName(''); setOwnerEmail(''); setOwnerPhone('');
-      setStoreNameTouched(false); setEmailTouched(false); setPhoneTouched(false);
-      setEmailCheckStatus('idle'); setEmailCheckMessage('');
+      setStoreName('');
+      setOwnerEmail('');
+      setOwnerPhone('');
+      setBusinessType('RETAIL');
+      setPricingPolicy('FIXED');
+      setStoreNameTouched(false);
+      setEmailTouched(false);
+      setPhoneTouched(false);
+      setEmailCheckStatus('idle');
+      setEmailCheckMessage('');
     } catch (err: any) {
       if (err?.code === 'EMAIL_ALREADY_EXISTS' || err?.code === 'REQUEST_ALREADY_PENDING') {
         setEmailCheckStatus('taken');
@@ -606,12 +621,148 @@ export const SaasLandingPageAlternate: React.FC<Props> = ({ availableTenants, on
                     </div>
                   </div>
 
-                  {/* Card 2: Subscription Plan */}
+                  {/* Card 2: Business Type & Pricing Policy */}
+                  <div className="bg-white dark:bg-gradient-to-b dark:from-[#131B2E]/90 dark:to-[#0A0E1A]/80 p-5 rounded-2xl border border-gray-200 dark:border-[#1A263D] shadow-xs space-y-4">
+                    <div className="flex items-center justify-between pb-2 border-b border-gray-100 dark:border-slate-800">
+                      <h5 className="font-bold text-gray-800 dark:text-white text-xs uppercase tracking-wider flex items-center gap-2">
+                        <Store className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" />
+                        <span>2. Business Type &amp; Pricing Policy</span>
+                      </h5>
+                      <span className="text-[11px] text-purple-600 dark:text-purple-400 font-semibold bg-purple-50 dark:bg-purple-950/60 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800">
+                        {businessType === 'RETAIL' ? 'Retail (B2C)' : 'Wholesale (B2B)'}
+                      </span>
+                    </div>
+
+                    {/* Business Type Selector */}
+                    <div>
+                      <label className="block text-xs font-bold text-gray-800 dark:text-slate-200 mb-2">
+                        Choose Business Type <span className="text-red-500">*</span>
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <label
+                          className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition ${
+                            businessType === 'RETAIL'
+                              ? 'border-purple-600 bg-purple-50/70 dark:bg-purple-950/40 dark:border-purple-500 ring-1 ring-purple-500/20'
+                              : 'border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 hover:border-gray-300'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="altRequestBusinessType"
+                            value="RETAIL"
+                            checked={businessType === 'RETAIL'}
+                            onChange={() => setBusinessType('RETAIL')}
+                            className="mt-0.5 text-purple-600 focus:ring-purple-500"
+                          />
+                          <div className="text-xs">
+                            <span className="font-bold text-slate-900 dark:text-white block">Retail Store (B2C)</span>
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                              Individual pair sales, barcode scanning, walk-in shoppers &amp; returns
+                            </span>
+                          </div>
+                        </label>
+
+                        <label
+                          className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition ${
+                            businessType === 'WHOLESALE'
+                              ? 'border-purple-600 bg-purple-50/70 dark:bg-purple-950/40 dark:border-purple-500 ring-1 ring-purple-500/20'
+                              : 'border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 hover:border-gray-300'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="altRequestBusinessType"
+                            value="WHOLESALE"
+                            checked={businessType === 'WHOLESALE'}
+                            onChange={() => {
+                              setBusinessType('WHOLESALE');
+                              setPricingPolicy('FIXED');
+                            }}
+                            className="mt-0.5 text-purple-600 focus:ring-purple-500"
+                          />
+                          <div className="text-xs">
+                            <span className="font-bold text-slate-900 dark:text-white block">Wholesale Store (B2B)</span>
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                              Bulk carton packing, min order pairs, khata credit ledger &amp; transport bilty
+                            </span>
+                          </div>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Pricing Policy Radio Buttons (ONLY for Retail; hidden for Wholesale!) */}
+                    {businessType === 'RETAIL' ? (
+                      <div className="pt-2 border-t border-gray-100 dark:border-slate-800/80">
+                        <label className="block text-xs font-bold text-gray-800 dark:text-slate-200 mb-1.5">
+                          Which pricing policy does your shop have? <span className="text-red-500">*</span>
+                        </label>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-2.5">
+                          Select how product prices are handled at your checkout counter:
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <label
+                            className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition ${
+                              pricingPolicy === 'FIXED'
+                                ? 'border-purple-600 bg-purple-50/70 dark:bg-purple-950/40 dark:border-purple-500 ring-1 ring-purple-500/20'
+                                : 'border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 hover:border-gray-300'
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="altRequestPricingPolicy"
+                              value="FIXED"
+                              checked={pricingPolicy === 'FIXED'}
+                              onChange={() => setPricingPolicy('FIXED')}
+                              className="mt-0.5 text-purple-600 focus:ring-purple-500"
+                            />
+                            <div className="text-xs">
+                              <span className="font-bold text-slate-900 dark:text-white block">Fixed Price</span>
+                              <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                                Single fixed selling price printed on barcode tags
+                              </span>
+                            </div>
+                          </label>
+
+                          <label
+                            className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition ${
+                              pricingPolicy === 'NEGOTIABLE'
+                                ? 'border-purple-600 bg-purple-50/70 dark:bg-purple-950/40 dark:border-purple-500 ring-1 ring-purple-500/20'
+                                : 'border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 hover:border-gray-300'
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="altRequestPricingPolicy"
+                              value="NEGOTIABLE"
+                              checked={pricingPolicy === 'NEGOTIABLE'}
+                              onChange={() => setPricingPolicy('NEGOTIABLE')}
+                              className="mt-0.5 text-purple-600 focus:ring-purple-500"
+                            />
+                            <div className="text-xs">
+                              <span className="font-bold text-slate-900 dark:text-white block">Bargaining / Range Price</span>
+                              <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                                Min / Max price range allowing customer bargaining
+                              </span>
+                            </div>
+                          </label>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-xl bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200/70 dark:border-purple-800/50 flex items-center gap-2 text-xs text-purple-800 dark:text-purple-300">
+                        <CheckCircle2 className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
+                        <span>
+                          <strong>Fixed Wholesale Pricing:</strong> Wholesale stores operate with standard fixed carton and wholesale pair rates.
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card 3: Subscription Plan */}
                   <div className="bg-white dark:bg-gradient-to-b dark:from-[#131B2E]/90 dark:to-[#0A0E1A]/80 p-5 rounded-2xl border border-gray-200 dark:border-[#1A263D] shadow-xs space-y-4">
                     <div className="flex items-center justify-between pb-2 border-b border-gray-100 dark:border-slate-800">
                       <h5 className="font-bold text-gray-800 dark:text-white text-xs uppercase tracking-wider flex items-center gap-2">
                         <ShieldCheck className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" />
-                        <span>2. Subscription Plan</span>
+                        <span>3. Subscription Plan</span>
                       </h5>
                       <span className="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-800">
                         Full POS Access

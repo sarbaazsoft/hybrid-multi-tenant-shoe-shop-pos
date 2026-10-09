@@ -123,6 +123,7 @@ const DATABASE_TABLE_DDL: string[] = [
     business_address TEXT DEFAULT '',
     plan TEXT NOT NULL DEFAULT 'PRO',
     business_type TEXT NOT NULL DEFAULT 'RETAIL',
+    pricing_mode TEXT NOT NULL DEFAULT 'FIXED',
     request_type TEXT NOT NULL DEFAULT 'NEW_STORE',
     notes TEXT DEFAULT '',
     status TEXT NOT NULL DEFAULT 'PENDING',
@@ -525,6 +526,10 @@ export async function ensureDatabaseSchema(): Promise<void> {
           END;
           BEGIN
             ALTER TABLE store_requests ADD COLUMN IF NOT EXISTS business_type TEXT NOT NULL DEFAULT 'RETAIL';
+          EXCEPTION WHEN OTHERS THEN NULL;
+          END;
+          BEGIN
+            ALTER TABLE store_requests ADD COLUMN IF NOT EXISTS pricing_mode TEXT NOT NULL DEFAULT 'FIXED';
           EXCEPTION WHEN OTHERS THEN NULL;
           END;
           BEGIN

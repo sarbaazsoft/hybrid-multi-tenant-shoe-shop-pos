@@ -292,6 +292,9 @@ export const api = {
       ownerEmail: string;
       ownerPhone?: string;
       plan?: string;
+      businessType?: 'RETAIL' | 'WHOLESALE' | string;
+      pricingPolicy?: 'FIXED' | 'NEGOTIABLE' | string;
+      pricingMode?: 'FIXED' | 'NEGOTIABLE' | string;
     }) => apiFetch<{
       success: boolean;
       requestId: number;
@@ -384,13 +387,23 @@ export const api = {
       ownerPhone?: string;
       themeColor?: string;
       currency?: string;
+      businessType?: 'RETAIL' | 'WHOLESALE' | string;
+      pricingPolicy?: 'FIXED' | 'NEGOTIABLE' | string;
+      pricingMode?: 'FIXED' | 'NEGOTIABLE' | string;
       subscriptionPlan?: '6_MONTHS' | 'YEARLY' | string;
       subscriptionStartDate?: string;
       subscriptionEndDate?: string;
     }) => apiFetch('/superadmin/tenants', { method: 'POST', body: data }),
     approveRequest: (
       requestId: number,
-      data?: { password?: string; storeName?: string; subscriptionPlan?: '6_MONTHS' | 'YEARLY' | string }
+      data?: {
+        password?: string;
+        storeName?: string;
+        businessType?: 'RETAIL' | 'WHOLESALE' | string;
+        pricingPolicy?: 'FIXED' | 'NEGOTIABLE' | string;
+        pricingMode?: 'FIXED' | 'NEGOTIABLE' | string;
+        subscriptionPlan?: '6_MONTHS' | 'YEARLY' | string;
+      }
     ) =>
       apiFetch(`/superadmin/store-requests/${requestId}/approve`, {
         method: 'POST',

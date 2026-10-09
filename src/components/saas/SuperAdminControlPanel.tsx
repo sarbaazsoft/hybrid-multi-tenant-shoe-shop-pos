@@ -223,7 +223,7 @@ export const SuperAdminControlPanel: React.FC<SuperAdminControlPanelProps> = ({
     manifestUrl: string;
   } | null>(null);
 
-  // Create Store Modal (Store Name, Owner Email, Password, Subscription Plan)
+  // Create Store Modal (Store Name, Owner Email, Password, Subscription Plan, Business Type, Pricing Policy)
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [newStoreName, setNewStoreName] = useState('');
   const [newOwnerName, setNewOwnerName] = useState('');
@@ -231,6 +231,8 @@ export const SuperAdminControlPanel: React.FC<SuperAdminControlPanelProps> = ({
   const [newOwnerPassword, setNewOwnerPassword] = useState('admin123');
   const [newOwnerConfirmPassword, setNewOwnerConfirmPassword] = useState('admin123');
   const [newSubscriptionPlan, setNewSubscriptionPlan] = useState<'6_MONTHS' | 'YEARLY'>('YEARLY');
+  const [newBusinessType, setNewBusinessType] = useState<'RETAIL' | 'WHOLESALE'>('RETAIL');
+  const [newPricingPolicy, setNewPricingPolicy] = useState<'FIXED' | 'NEGOTIABLE'>('FIXED');
   const [showNewOwnerPassword, setShowNewOwnerPassword] = useState(false);
   const [creatingStore, setCreatingStore] = useState(false);
   const [createStoreError, setCreateStoreError] = useState<string | null>(null);
@@ -649,6 +651,9 @@ export const SuperAdminControlPanel: React.FC<SuperAdminControlPanelProps> = ({
         ownerEmail: normalizedOwnerEmail,
         password: newOwnerPassword,
         subscriptionPlan: newSubscriptionPlan,
+        businessType: newBusinessType,
+        pricingPolicy: newBusinessType === 'WHOLESALE' ? 'FIXED' : newPricingPolicy,
+        pricingMode: newBusinessType === 'WHOLESALE' ? 'FIXED' : newPricingPolicy,
       });
       if (res.provisioned) {
         setProvisionedBanner(res.provisioned);
@@ -663,6 +668,8 @@ export const SuperAdminControlPanel: React.FC<SuperAdminControlPanelProps> = ({
       setNewOwnerPassword('admin123');
       setNewOwnerConfirmPassword('admin123');
       setNewSubscriptionPlan('YEARLY');
+      setNewBusinessType('RETAIL');
+      setNewPricingPolicy('FIXED');
       await loadOverview();
       onTenantsUpdated();
     } catch (err: any) {
@@ -3253,6 +3260,13 @@ export const SuperAdminControlPanel: React.FC<SuperAdminControlPanelProps> = ({
                                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide bg-sky-50 dark:bg-[#0284C7]/20 text-sky-700 dark:text-[#38BDF8] border border-sky-200 dark:border-[#0284C7]/40 font-mono">
                                       {store.currency || 'Rs.'}
                                     </span>
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide border font-mono ${
+                                      store.businessType === 'WHOLESALE'
+                                        ? 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-500/40'
+                                        : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/40'
+                                    }`}>
+                                      {store.businessType === 'WHOLESALE' ? 'Wholesale (B2B)' : 'Retail (B2C)'}
+                                    </span>
                                   </div>
                                 </td>
 
@@ -3641,6 +3655,16 @@ export const SuperAdminControlPanel: React.FC<SuperAdminControlPanelProps> = ({
                                         New Store
                                       </span>
                                     )}
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-500/40 font-mono">
+                                      {(reqItem.businessType || (reqItem as any).business_type || 'RETAIL').toUpperCase() === 'WHOLESALE' ? 'Wholesale (B2B)' : 'Retail (B2C)'}
+                                    </span>
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-mono">
+                                      {(reqItem.businessType || (reqItem as any).business_type || 'RETAIL').toUpperCase() === 'WHOLESALE'
+                                        ? 'Fixed Price'
+                                        : (reqItem.pricingPolicy || (reqItem as any).pricing_mode || 'FIXED').toUpperCase() === 'NEGOTIABLE'
+                                        ? 'Bargaining'
+                                        : 'Fixed Price'}
+                                    </span>
                                   </div>
                                 </td>
 
@@ -4005,12 +4029,148 @@ export const SuperAdminControlPanel: React.FC<SuperAdminControlPanelProps> = ({
                 </div>
               </div>
 
-              {/* CARD 2: OWNER SECURITY CREDENTIALS */}
+              {/* CARD 2: BUSINESS MODEL & PRICING POLICY */}
+              <div className="bg-white dark:bg-gradient-to-b dark:from-[#131B2E]/90 dark:to-[#0A0E1A]/80 p-5 rounded-2xl border border-gray-200 dark:border-[#1A263D] shadow-xs dark:shadow-[0_0_20px_rgba(59,130,246,0.05)] space-y-4">
+                <div className="flex items-center justify-between pb-2 border-b border-gray-100 dark:border-slate-800">
+                  <h5 className="font-bold text-gray-800 dark:text-white text-xs uppercase tracking-wider flex items-center gap-2">
+                    <Store className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" />
+                    <span>2. Business Type &amp; Pricing Policy</span>
+                  </h5>
+                  <span className="text-[11px] text-purple-600 dark:text-purple-400 font-semibold bg-purple-50 dark:bg-purple-950/60 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800">
+                    {newBusinessType === 'RETAIL' ? 'Retail (B2C)' : 'Wholesale (B2B)'}
+                  </span>
+                </div>
+
+                {/* Business Type Selector */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-800 dark:text-slate-200 mb-2">
+                    Choose Business Type <span className="text-red-500 dark:text-pink-400">*</span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label
+                      className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition ${
+                        newBusinessType === 'RETAIL'
+                          ? 'border-purple-600 bg-purple-50/70 dark:bg-purple-950/40 dark:border-purple-500 ring-1 ring-purple-500/20'
+                          : 'border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 hover:border-gray-300'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="superAdminBusinessType"
+                        value="RETAIL"
+                        checked={newBusinessType === 'RETAIL'}
+                        onChange={() => setNewBusinessType('RETAIL')}
+                        className="mt-0.5 text-purple-600 focus:ring-purple-500"
+                      />
+                      <div className="text-xs">
+                        <span className="font-bold text-slate-900 dark:text-white block">Retail Store (B2C)</span>
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                          Individual pair sales, barcode scanning, walk-in shoppers &amp; returns
+                        </span>
+                      </div>
+                    </label>
+
+                    <label
+                      className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition ${
+                        newBusinessType === 'WHOLESALE'
+                          ? 'border-purple-600 bg-purple-50/70 dark:bg-purple-950/40 dark:border-purple-500 ring-1 ring-purple-500/20'
+                          : 'border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 hover:border-gray-300'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="superAdminBusinessType"
+                        value="WHOLESALE"
+                        checked={newBusinessType === 'WHOLESALE'}
+                        onChange={() => {
+                          setNewBusinessType('WHOLESALE');
+                          setNewPricingPolicy('FIXED');
+                        }}
+                        className="mt-0.5 text-purple-600 focus:ring-purple-500"
+                      />
+                      <div className="text-xs">
+                        <span className="font-bold text-slate-900 dark:text-white block">Wholesale Store (B2B)</span>
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                          Bulk carton packing, min order pairs, khata credit ledger &amp; transport bilty
+                        </span>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Pricing Policy Radio Buttons (ONLY for Retail; hidden for Wholesale!) */}
+                {newBusinessType === 'RETAIL' ? (
+                  <div className="pt-2 border-t border-gray-100 dark:border-slate-800/80">
+                    <label className="block text-xs font-bold text-gray-800 dark:text-slate-200 mb-1.5">
+                      Which pricing policy does your shop have? <span className="text-red-500 dark:text-pink-400">*</span>
+                    </label>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-2.5">
+                      Select how product prices are handled at the checkout counter:
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <label
+                        className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition ${
+                          newPricingPolicy === 'FIXED'
+                            ? 'border-purple-600 bg-purple-50/70 dark:bg-purple-950/40 dark:border-purple-500 ring-1 ring-purple-500/20'
+                            : 'border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 hover:border-gray-300'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="superAdminPricingPolicy"
+                          value="FIXED"
+                          checked={newPricingPolicy === 'FIXED'}
+                          onChange={() => setNewPricingPolicy('FIXED')}
+                          className="mt-0.5 text-purple-600 focus:ring-purple-500"
+                        />
+                        <div className="text-xs">
+                          <span className="font-bold text-slate-900 dark:text-white block">Fixed Price</span>
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                            Single fixed selling price printed on barcode tags
+                          </span>
+                        </div>
+                      </label>
+
+                      <label
+                        className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition ${
+                          newPricingPolicy === 'NEGOTIABLE'
+                            ? 'border-purple-600 bg-purple-50/70 dark:bg-purple-950/40 dark:border-purple-500 ring-1 ring-purple-500/20'
+                            : 'border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 hover:border-gray-300'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="superAdminPricingPolicy"
+                          value="NEGOTIABLE"
+                          checked={newPricingPolicy === 'NEGOTIABLE'}
+                          onChange={() => setNewPricingPolicy('NEGOTIABLE')}
+                          className="mt-0.5 text-purple-600 focus:ring-purple-500"
+                        />
+                        <div className="text-xs">
+                          <span className="font-bold text-slate-900 dark:text-white block">Bargaining / Range Price</span>
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                            Min / Max price range allowing customer bargaining
+                          </span>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200/70 dark:border-purple-800/50 flex items-center gap-2 text-xs text-purple-800 dark:text-purple-300">
+                    <CheckCircle2 className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
+                    <span>
+                      <strong>Fixed Wholesale Pricing:</strong> Wholesale stores operate with standard fixed carton and wholesale pair rates.
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* CARD 3: OWNER SECURITY CREDENTIALS */}
               <div className="bg-white dark:bg-gradient-to-b dark:from-[#131B2E]/90 dark:to-[#0A0E1A]/80 p-5 rounded-2xl border border-gray-200 dark:border-[#1A263D] shadow-xs dark:shadow-[0_0_20px_rgba(59,130,246,0.05)] space-y-4">
                 <div className="flex items-center justify-between pb-2 border-b border-gray-100 dark:border-slate-800">
                   <h5 className="font-bold text-gray-800 dark:text-white text-xs uppercase tracking-wider flex items-center gap-2">
                     <Lock className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" />
-                    <span>2. Owner Security &amp; Credentials</span>
+                    <span>3. Owner Security &amp; Credentials</span>
                   </h5>
                   <span className="text-[10px] text-purple-600 dark:text-purple-300 font-semibold bg-purple-50 dark:bg-purple-950/50 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800">
                     Min 4 Characters
@@ -4090,12 +4250,12 @@ export const SuperAdminControlPanel: React.FC<SuperAdminControlPanelProps> = ({
                 )}
               </div>
 
-              {/* CARD 3: SUBSCRIPTION PLAN & TENANT PROVISIONING */}
+              {/* CARD 4: SUBSCRIPTION PLAN & TENANT PROVISIONING */}
               <div className="bg-white dark:bg-gradient-to-b dark:from-[#131B2E]/90 dark:to-[#0A0E1A]/80 p-5 rounded-2xl border border-gray-200 dark:border-[#1A263D] shadow-xs dark:shadow-[0_0_20px_rgba(59,130,246,0.05)] space-y-4">
                 <div className="flex items-center justify-between pb-2 border-b border-gray-100 dark:border-slate-800">
                   <h5 className="font-bold text-gray-800 dark:text-white text-xs uppercase tracking-wider flex items-center gap-2">
                     <KeyRound className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" />
-                    <span>3. Subscription Plan &amp; License Key</span>
+                    <span>4. Subscription Plan &amp; License Key</span>
                   </h5>
                   <span className="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-800">
                     Active on Creation

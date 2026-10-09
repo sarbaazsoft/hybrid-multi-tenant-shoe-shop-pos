@@ -27,6 +27,7 @@ import {
   UserPlus,
   SkipForward,
   Info,
+  Store,
 } from 'lucide-react';
 import { api, setAuthSession } from '../../services/api';
 import { ShowroomBackground } from '../common/ShowroomBackground';
@@ -95,6 +96,7 @@ export const TenantOnboardingWizard: React.FC<TenantOnboardingWizardProps> = ({
   const [invoicePrefix, setInvoicePrefix] = useState('INV-');
   const [purchasePrefix, setPurchasePrefix] = useState('PUR-');
   const [lowStockLimit, setLowStockLimit] = useState(5);
+  const [businessType, setBusinessType] = useState<'RETAIL' | 'WHOLESALE'>('RETAIL');
   const [pricingPolicy, setPricingPolicy] = useState<'FIXED' | 'NEGOTIABLE'>('FIXED');
   const [currency, setCurrency] = useState('PKR');
   const [taxRate, setTaxRate] = useState<number>(0);
@@ -135,7 +137,13 @@ export const TenantOnboardingWizard: React.FC<TenantOnboardingWizardProps> = ({
               'Thank you for shopping with us! Exchanges accepted within 7 days with original receipt.'
           );
           setLowStockLimit(Number(t.lowStockLimit) || 5);
-          setPricingPolicy(((t as any).pricingPolicy || (t as any).pricingMode) === 'NEGOTIABLE' ? 'NEGOTIABLE' : 'FIXED');
+          const bType = ((t as any).businessType || (t as any).business_type || 'RETAIL').toUpperCase() === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL';
+          setBusinessType(bType);
+          if (bType === 'WHOLESALE') {
+            setPricingPolicy('FIXED');
+          } else {
+            setPricingPolicy(((t as any).pricingPolicy || (t as any).pricingMode) === 'NEGOTIABLE' ? 'NEGOTIABLE' : 'FIXED');
+          }
           setThemeColor(t.themeColor || '#7C3AED');
           setBackgroundColor(t.backgroundColor || '#0F172A');
           setLogoUrl(t.logoUrl || '/pwa-512x512.png');
@@ -267,7 +275,8 @@ export const TenantOnboardingWizard: React.FC<TenantOnboardingWizardProps> = ({
         purchasePrefix: purchasePrefix.trim(),
         invoiceFooter: toTitleCaseTrimmed(invoiceFooter),
         lowStockLimit,
-        pricingPolicy,
+        businessType,
+        pricingPolicy: businessType === 'WHOLESALE' ? 'FIXED' : pricingPolicy,
         themeColor,
         backgroundColor,
         logoUrl,
@@ -391,13 +400,15 @@ export const TenantOnboardingWizard: React.FC<TenantOnboardingWizardProps> = ({
 
                 <div className="p-4 rounded-2xl bg-slate-50/90 dark:bg-slate-950/70 border border-slate-200/80 dark:border-slate-800 space-y-1.5">
                   <div className="flex items-center justify-between text-[11px] font-mono font-bold uppercase text-slate-500 dark:text-slate-400">
-                    <span>Pricing &amp; Currency Policy</span>
+                    <span>Business Type &amp; Pricing Policy</span>
                     <Lock className="w-3.5 h-3.5 text-amber-500" />
                   </div>
                   <div className="text-xs font-bold text-slate-900 dark:text-white">
-                    {pricingPolicy === 'NEGOTIABLE'
-                      ? 'Negotiable Price Policy (NEGOTIABLE)'
-                      : 'Fixed Retail Price Policy (FIXED)'}
+                    {businessType === 'WHOLESALE'
+                      ? 'Wholesale Store (B2B) • Fixed Carton Pricing'
+                      : pricingPolicy === 'NEGOTIABLE'
+                      ? 'Retail Store (B2C) • Bargaining Price Range'
+                      : 'Retail Store (B2C) • Fixed Price'}
                   </div>
                   <div className="text-xs font-mono text-slate-700 dark:text-slate-300">
                     Currency: <strong>{currency}</strong> • Sales Tax: <strong>{taxRate}%</strong>
@@ -1014,20 +1025,133 @@ export const TenantOnboardingWizard: React.FC<TenantOnboardingWizardProps> = ({
                           />
                         </div>
 
-                        <div>
-                          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                            Counter Pricing Policy
-                          </label>
-                          <select
-                            value={pricingPolicy}
-                            onChange={(e) =>
-                              setPricingPolicy(e.target.value === 'NEGOTIABLE' ? 'NEGOTIABLE' : 'FIXED')
-                            }
-                            className="app-input capitalize w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-purple-800/60 text-slate-900 dark:text-white text-sm"
-                          >
-                            <option value="FIXED">Fixed Retail Price (Standard Barcode Checkout)</option>
-                            <option value="NEGOTIABLE">Negotiable Price Range (Min / Max Bargaining)</option>
-                          </select>
+                        <div className="sm:col-span-2 pt-2 border-t border-slate-200/80 dark:border-purple-900/40 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                              Business Type &amp; Pricing Policy *
+                            </label>
+                            <span className="text-[11px] text-purple-700 dark:text-purple-300 font-bold px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950/60 border border-purple-200 dark:border-purple-800">
+                              {businessType === 'RETAIL' ? 'Retail (B2C)' : 'Wholesale (B2B)'}
+                            </span>
+                          </div>
+
+                          {/* Business Type Selector */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <label
+                              className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition ${
+                                businessType === 'RETAIL'
+                                  ? 'border-purple-600 bg-purple-50/70 dark:bg-purple-950/40 dark:border-purple-500 ring-1 ring-purple-500/20'
+                                  : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name="onboardingBusinessType"
+                                value="RETAIL"
+                                checked={businessType === 'RETAIL'}
+                                onChange={() => setBusinessType('RETAIL')}
+                                className="mt-0.5 text-purple-600 focus:ring-purple-500"
+                              />
+                              <div className="text-xs">
+                                <span className="font-bold text-slate-900 dark:text-white block">Retail Store (B2C)</span>
+                                <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                                  Individual pair sales, barcode scanning, walk-in shoppers &amp; returns
+                                </span>
+                              </div>
+                            </label>
+
+                            <label
+                              className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition ${
+                                businessType === 'WHOLESALE'
+                                  ? 'border-purple-600 bg-purple-50/70 dark:bg-purple-950/40 dark:border-purple-500 ring-1 ring-purple-500/20'
+                                  : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name="onboardingBusinessType"
+                                value="WHOLESALE"
+                                checked={businessType === 'WHOLESALE'}
+                                onChange={() => {
+                                  setBusinessType('WHOLESALE');
+                                  setPricingPolicy('FIXED');
+                                }}
+                                className="mt-0.5 text-purple-600 focus:ring-purple-500"
+                              />
+                              <div className="text-xs">
+                                <span className="font-bold text-slate-900 dark:text-white block">Wholesale Store (B2B)</span>
+                                <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                                  Bulk carton packing, min order pairs, khata credit ledger &amp; transport bilty
+                                </span>
+                              </div>
+                            </label>
+                          </div>
+
+                          {/* Pricing Policy (2 Radio Buttons if Retail; Hidden if Wholesale!) */}
+                          {businessType === 'RETAIL' ? (
+                            <div className="p-3.5 rounded-xl bg-purple-50/40 dark:bg-purple-950/20 border border-purple-200/60 dark:border-purple-900/40 space-y-2">
+                              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                                Which pricing policy does your shop have? *
+                              </label>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                Select how product selling prices are handled at checkout counter:
+                              </p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                                <label
+                                  className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition ${
+                                    pricingPolicy === 'FIXED'
+                                      ? 'border-purple-600 bg-purple-50 dark:bg-purple-950/40 dark:border-purple-500 ring-1 ring-purple-500/20'
+                                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
+                                  }`}
+                                >
+                                  <input
+                                    type="radio"
+                                    name="onboardingPricingPolicy"
+                                    value="FIXED"
+                                    checked={pricingPolicy === 'FIXED'}
+                                    onChange={() => setPricingPolicy('FIXED')}
+                                    className="mt-0.5 text-purple-600 focus:ring-purple-500"
+                                  />
+                                  <div className="text-xs">
+                                    <span className="font-bold text-slate-900 dark:text-white block">Fixed Price</span>
+                                    <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                                      Single fixed selling price printed on barcode tags
+                                    </span>
+                                  </div>
+                                </label>
+
+                                <label
+                                  className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition ${
+                                    pricingPolicy === 'NEGOTIABLE'
+                                      ? 'border-purple-600 bg-purple-50 dark:bg-purple-950/40 dark:border-purple-500 ring-1 ring-purple-500/20'
+                                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
+                                  }`}
+                                >
+                                  <input
+                                    type="radio"
+                                    name="onboardingPricingPolicy"
+                                    value="NEGOTIABLE"
+                                    checked={pricingPolicy === 'NEGOTIABLE'}
+                                    onChange={() => setPricingPolicy('NEGOTIABLE')}
+                                    className="mt-0.5 text-purple-600 focus:ring-purple-500"
+                                  />
+                                  <div className="text-xs">
+                                    <span className="font-bold text-slate-900 dark:text-white block">Bargaining / Range Price</span>
+                                    <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                                      Min / Max price range allowing customer bargaining
+                                    </span>
+                                  </div>
+                                </label>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="p-3 rounded-xl bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200/70 dark:border-purple-800/50 flex items-center gap-2 text-xs text-purple-800 dark:text-purple-300">
+                              <CheckCircle2 className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
+                              <span>
+                                <strong>Fixed Wholesale Pricing:</strong> Wholesale stores operate with standard fixed carton and wholesale pair rates.
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
