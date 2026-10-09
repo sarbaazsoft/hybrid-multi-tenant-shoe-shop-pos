@@ -11,7 +11,10 @@ const router = Router();
 // Helper to generate next unique invoice number scoped to tenant
 async function generateInvoiceNumber(tenantId: number): Promise<string> {
   const settingsRes = await pgClient.query<{ invoice_prefix: string }>(
-    'SELECT invoice_prefix FROM company_settings WHERE COALESCE(tenant_id, 1) = $1 LIMIT 1',
+    `SELECT COALESCE(NULLIF(cs.invoice_prefix, ''), NULLIF(t.invoice_prefix, ''), 'INV-') AS invoice_prefix
+     FROM company_settings cs
+     FULL OUTER JOIN tenants t ON t.id = cs.tenant_id
+     WHERE COALESCE(cs.tenant_id, t.id) = $1 LIMIT 1`,
     [tenantId]
   );
   const prefix = settingsRes.rows[0]?.invoice_prefix || 'INV-';

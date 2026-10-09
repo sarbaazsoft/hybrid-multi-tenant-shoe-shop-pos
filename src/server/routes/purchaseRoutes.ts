@@ -10,7 +10,10 @@ const router = Router();
 // Helper to generate unique purchase number
 async function generatePurchaseNumber(tenantId: number): Promise<string> {
   const settingsRes = await pgClient.query<{ purchase_prefix: string }>(
-    'SELECT purchase_prefix FROM company_settings WHERE tenant_id = $1 LIMIT 1',
+    `SELECT COALESCE(NULLIF(cs.purchase_prefix, ''), NULLIF(t.purchase_prefix, ''), 'PUR-') AS purchase_prefix
+     FROM company_settings cs
+     FULL OUTER JOIN tenants t ON t.id = cs.tenant_id
+     WHERE COALESCE(cs.tenant_id, t.id) = $1 LIMIT 1`,
     [tenantId]
   );
   const prefix = settingsRes.rows[0]?.purchase_prefix || 'PUR-';

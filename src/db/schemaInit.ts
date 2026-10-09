@@ -89,6 +89,10 @@ const DATABASE_TABLE_DDL: string[] = [
     name TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'ACTIVE',
     business_type TEXT NOT NULL DEFAULT 'RETAIL',
+    pricing_policy TEXT NOT NULL DEFAULT 'FIXED',
+    pricing_mode TEXT NOT NULL DEFAULT 'FIXED',
+    invoice_prefix TEXT NOT NULL DEFAULT 'INV-',
+    purchase_prefix TEXT NOT NULL DEFAULT 'PUR-',
     subscription_plan TEXT NOT NULL DEFAULT 'YEARLY',
     subscription_start_date TIMESTAMP NOT NULL DEFAULT NOW(),
     subscription_end_date TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '1 year'),
@@ -124,6 +128,9 @@ const DATABASE_TABLE_DDL: string[] = [
     plan TEXT NOT NULL DEFAULT 'PRO',
     business_type TEXT NOT NULL DEFAULT 'RETAIL',
     pricing_mode TEXT NOT NULL DEFAULT 'FIXED',
+    pricing_policy TEXT NOT NULL DEFAULT 'FIXED',
+    invoice_prefix TEXT NOT NULL DEFAULT 'INV-',
+    purchase_prefix TEXT NOT NULL DEFAULT 'PUR-',
     request_type TEXT NOT NULL DEFAULT 'NEW_STORE',
     notes TEXT DEFAULT '',
     status TEXT NOT NULL DEFAULT 'PENDING',
@@ -507,9 +514,25 @@ export async function ensureDatabaseSchema(): Promise<void> {
           EXCEPTION WHEN OTHERS THEN NULL;
           END;
 
-          -- Wholesale (B2B) columns idempotent additions
+          -- Wholesale (B2B) and Relocated Immutable Settings in tenants
           BEGIN
             ALTER TABLE tenants ADD COLUMN IF NOT EXISTS business_type TEXT NOT NULL DEFAULT 'RETAIL';
+          EXCEPTION WHEN OTHERS THEN NULL;
+          END;
+          BEGIN
+            ALTER TABLE tenants ADD COLUMN IF NOT EXISTS pricing_policy TEXT NOT NULL DEFAULT 'FIXED';
+          EXCEPTION WHEN OTHERS THEN NULL;
+          END;
+          BEGIN
+            ALTER TABLE tenants ADD COLUMN IF NOT EXISTS pricing_mode TEXT NOT NULL DEFAULT 'FIXED';
+          EXCEPTION WHEN OTHERS THEN NULL;
+          END;
+          BEGIN
+            ALTER TABLE tenants ADD COLUMN IF NOT EXISTS invoice_prefix TEXT NOT NULL DEFAULT 'INV-';
+          EXCEPTION WHEN OTHERS THEN NULL;
+          END;
+          BEGIN
+            ALTER TABLE tenants ADD COLUMN IF NOT EXISTS purchase_prefix TEXT NOT NULL DEFAULT 'PUR-';
           EXCEPTION WHEN OTHERS THEN NULL;
           END;
           BEGIN
@@ -530,6 +553,30 @@ export async function ensureDatabaseSchema(): Promise<void> {
           END;
           BEGIN
             ALTER TABLE store_requests ADD COLUMN IF NOT EXISTS pricing_mode TEXT NOT NULL DEFAULT 'FIXED';
+          EXCEPTION WHEN OTHERS THEN NULL;
+          END;
+          BEGIN
+            ALTER TABLE store_requests ADD COLUMN IF NOT EXISTS pricing_policy TEXT NOT NULL DEFAULT 'FIXED';
+          EXCEPTION WHEN OTHERS THEN NULL;
+          END;
+          BEGIN
+            ALTER TABLE store_requests ADD COLUMN IF NOT EXISTS invoice_prefix TEXT NOT NULL DEFAULT 'INV-';
+          EXCEPTION WHEN OTHERS THEN NULL;
+          END;
+          BEGIN
+            ALTER TABLE store_requests ADD COLUMN IF NOT EXISTS purchase_prefix TEXT NOT NULL DEFAULT 'PUR-';
+          EXCEPTION WHEN OTHERS THEN NULL;
+          END;
+          -- Relocate immutable settings from tenants to company_settings (ensuring company_settings is authoritative)
+          BEGIN
+            UPDATE company_settings cs
+            SET business_type = COALESCE(NULLIF(cs.business_type, ''), NULLIF(t.business_type, ''), 'RETAIL'),
+                pricing_mode = COALESCE(NULLIF(cs.pricing_mode, ''), NULLIF(t.pricing_policy, ''), NULLIF(t.pricing_mode, ''), 'FIXED'),
+                invoice_prefix = COALESCE(NULLIF(cs.invoice_prefix, ''), NULLIF(t.invoice_prefix, ''), 'INV-'),
+                purchase_prefix = COALESCE(NULLIF(cs.purchase_prefix, ''), NULLIF(t.purchase_prefix, ''), 'PUR-'),
+                pricing_policy_locked = true
+            FROM tenants t
+            WHERE cs.tenant_id = t.id;
           EXCEPTION WHEN OTHERS THEN NULL;
           END;
           BEGIN
@@ -901,7 +948,7 @@ export async function ensureSaasControlPlane(): Promise<void> {
           `SELECT COUNT(*) as count,
                   (to_regclass('public.users') IS NOT NULL AND to_regclass('public.tenants') IS NOT NULL) as has_core_tables
            FROM deleted_store_requests
-           WHERE marker_key = '__schema_v11_remove_requested_slug__'`
+           WHERE marker_key = '__schema_v12_relocate_immutable_tenant_settings__'`
         )
         .catch(() => null);
 
@@ -1090,7 +1137,7 @@ export async function ensureSaasControlPlane(): Promise<void> {
 
     await pgClient
       .query(
-        `INSERT INTO deleted_store_requests (request_id, marker_key) VALUES (0, '__schema_v11_remove_requested_slug__')`
+        `INSERT INTO deleted_store_requests (request_id, marker_key) VALUES (0, '__schema_v12_relocate_immutable_tenant_settings__')`
       )
       .catch(() => {});
 

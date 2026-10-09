@@ -24,6 +24,8 @@ import {
   DollarSign,
   Sparkles,
   MessageCircle,
+  Hash,
+  Receipt,
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { PublicFooter } from '../common/PublicFooter';
@@ -240,6 +242,8 @@ export const SaasLandingPage: React.FC<SaasLandingPageProps> = ({
   const [plan, setPlan] = useState('1_YEAR_RS_18000');
   const [businessType, setBusinessType] = useState<BusinessType>('RETAIL');
   const [pricingPolicy, setPricingPolicy] = useState<PricingPolicy>('FIXED');
+  const [invoicePrefix, setInvoicePrefix] = useState('INV-');
+  const [purchasePrefix, setPurchasePrefix] = useState('PUR-');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<{
@@ -397,6 +401,8 @@ export const SaasLandingPage: React.FC<SaasLandingPageProps> = ({
         plan,
         businessType,
         pricingPolicy: businessType === 'WHOLESALE' ? 'FIXED' : pricingPolicy,
+        invoicePrefix: invoicePrefix.trim() || 'INV-',
+        purchasePrefix: purchasePrefix.trim() || 'PUR-',
       });
       const resolvedSuperAdminEmail = res.superAdminEmail || platformOwnerEmail;
       const resolvedSuperAdminPhone = res.superAdminPhone || platformOwnerPhone;
@@ -1481,12 +1487,8 @@ export const SaasLandingPage: React.FC<SaasLandingPageProps> = ({
                         !
                       </span>
                       <div className="space-y-0.5">
-                        <div className="font-bold text-amber-900 dark:text-amber-100 text-xs flex items-center gap-1.5">
-                          <span>Important Notice (Locked Settings)</span>
-                        </div>
-                        <p className="text-[11.5px] leading-relaxed text-amber-800 dark:text-amber-200">
-                          These settings cannot be changed after store request approval. Sit back and choose your business type and pricing policy attentively!
-                          (Business Type, Pricing Policy, Invoice Prefix, and Purchase Prefix will be permanently locked upon store approval).
+                        <p className="text-[11.5px] leading-relaxed text-amber-900 dark:text-amber-100 font-semibold">
+                          Caution: These settings cannot be changed after the store request is approved. Please choose your Business Type, Pricing Policy, and Prefixes carefully.
                         </p>
                       </div>
                     </div>
@@ -1613,6 +1615,50 @@ export const SaasLandingPage: React.FC<SaasLandingPageProps> = ({
                         </span>
                       </div>
                     )}
+                    {/* Invoice & Purchase Prefix Inputs (Permanently locked once store is approved) */}
+                    <div className="pt-3 border-t border-gray-100 dark:border-slate-800/80">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-bold text-gray-800 dark:text-slate-200 mb-1.5">
+                            Sales Invoice Prefix <span className="text-red-500 dark:text-pink-400">*</span>
+                          </label>
+                          <div className="relative">
+                            <Receipt className="w-4 h-4 text-purple-600 dark:text-purple-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            <input
+                              type="text"
+                              required
+                              value={invoicePrefix}
+                              onChange={(e) => setInvoicePrefix(e.target.value.toUpperCase())}
+                              placeholder="e.g. INV-"
+                              className="w-full pl-9 pr-3 py-2 bg-white dark:bg-purple-500/20 border border-gray-300 dark:border-purple-400/40 rounded-xl text-xs font-mono font-bold text-gray-900 dark:text-purple-100 placeholder-slate-400 dark:placeholder-purple-300/40 hover:bg-slate-50 dark:hover:bg-purple-500/30 outline-none focus:border-indigo-600 dark:focus:border-purple-400 transition"
+                            />
+                          </div>
+                          <span className="text-[10.5px] text-slate-500 dark:text-slate-400 mt-1 block">
+                            e.g., {invoicePrefix || 'INV-'}00001
+                          </span>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-gray-800 dark:text-slate-200 mb-1.5">
+                            Purchase Order Prefix <span className="text-red-500 dark:text-pink-400">*</span>
+                          </label>
+                          <div className="relative">
+                            <Hash className="w-4 h-4 text-purple-600 dark:text-purple-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            <input
+                              type="text"
+                              required
+                              value={purchasePrefix}
+                              onChange={(e) => setPurchasePrefix(e.target.value.toUpperCase())}
+                              placeholder="e.g. PUR-"
+                              className="w-full pl-9 pr-3 py-2 bg-white dark:bg-purple-500/20 border border-gray-300 dark:border-purple-400/40 rounded-xl text-xs font-mono font-bold text-gray-900 dark:text-purple-100 placeholder-slate-400 dark:placeholder-purple-300/40 hover:bg-slate-50 dark:hover:bg-purple-500/30 outline-none focus:border-indigo-600 dark:focus:border-purple-400 transition"
+                            />
+                          </div>
+                          <span className="text-[10.5px] text-slate-500 dark:text-slate-400 mt-1 block">
+                            e.g., {purchasePrefix || 'PUR-'}2026-0001
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   {/* CARD 3: SUBSCRIPTION PLAN */}

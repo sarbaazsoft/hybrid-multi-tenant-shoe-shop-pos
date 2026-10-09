@@ -398,11 +398,14 @@ router.post('/saas/store-requests', async (req: Request, res: Response) => {
         ? 'NEGOTIABLE'
         : 'FIXED';
 
+    const rawInvoicePrefix = String(req.body.invoicePrefix || req.body.invoice_prefix || 'INV-').trim() || 'INV-';
+    const rawPurchasePrefix = String(req.body.purchasePrefix || req.body.purchase_prefix || 'PUR-').trim() || 'PUR-';
+
     let insertRes;
     try {
       insertRes = await pgClient.query<{ id: number }>(
-        `INSERT INTO store_requests (store_name, owner_email, owner_phone, plan, business_type, pricing_mode, status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'PENDING')
+        `INSERT INTO store_requests (store_name, owner_email, owner_phone, plan, business_type, pricing_mode, pricing_policy, invoice_prefix, purchase_prefix, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, 'PENDING')
          RETURNING id`,
         [
           cleanStoreName,
@@ -411,6 +414,8 @@ router.post('/saas/store-requests', async (req: Request, res: Response) => {
           String(plan || 'PRO_TRIAL').trim(),
           finalBusinessType,
           finalPricingMode,
+          rawInvoicePrefix,
+          rawPurchasePrefix,
         ]
       );
     } catch (insertErr: any) {
@@ -418,9 +423,11 @@ router.post('/saas/store-requests', async (req: Request, res: Response) => {
         insertErr &&
         (String(insertErr.message || '').includes('requested_slug') ||
           String(insertErr.message || '').includes('slug') ||
-          String(insertErr.constraint || '').includes('slug'))
+          String(insertErr.constraint || '').includes('slug') ||
+          String(insertErr.message || '').includes('column') ||
+          String(insertErr.message || '').includes('does not exist'))
       ) {
-        // Drop requested_slug NOT NULL constraint and remove column from relation
+        // Drop requested_slug NOT NULL constraint and ensure new columns exist
         await pgClient.exec(`
           DO $$
           BEGIN
@@ -448,12 +455,24 @@ router.post('/saas/store-requests', async (req: Request, res: Response) => {
               ALTER TABLE store_requests ADD COLUMN IF NOT EXISTS pricing_mode TEXT NOT NULL DEFAULT 'FIXED';
             EXCEPTION WHEN OTHERS THEN NULL;
             END;
+            BEGIN
+              ALTER TABLE store_requests ADD COLUMN IF NOT EXISTS pricing_policy TEXT NOT NULL DEFAULT 'FIXED';
+            EXCEPTION WHEN OTHERS THEN NULL;
+            END;
+            BEGIN
+              ALTER TABLE store_requests ADD COLUMN IF NOT EXISTS invoice_prefix TEXT NOT NULL DEFAULT 'INV-';
+            EXCEPTION WHEN OTHERS THEN NULL;
+            END;
+            BEGIN
+              ALTER TABLE store_requests ADD COLUMN IF NOT EXISTS purchase_prefix TEXT NOT NULL DEFAULT 'PUR-';
+            EXCEPTION WHEN OTHERS THEN NULL;
+            END;
           END $$;
         `).catch(() => {});
 
         insertRes = await pgClient.query<{ id: number }>(
-          `INSERT INTO store_requests (store_name, owner_email, owner_phone, plan, business_type, pricing_mode, status)
-           VALUES ($1, $2, $3, $4, $5, $6, 'PENDING')
+          `INSERT INTO store_requests (store_name, owner_email, owner_phone, plan, business_type, pricing_mode, pricing_policy, invoice_prefix, purchase_prefix, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, 'PENDING')
            RETURNING id`,
           [
             cleanStoreName,
@@ -462,6 +481,8 @@ router.post('/saas/store-requests', async (req: Request, res: Response) => {
             String(plan || 'PRO_TRIAL').trim(),
             finalBusinessType,
             finalPricingMode,
+            rawInvoicePrefix,
+            rawPurchasePrefix,
           ]
         );
       } else {
@@ -1198,6 +1219,8 @@ async function provisionNewTenantStore(params: {
   businessType?: 'RETAIL' | 'WHOLESALE';
   pricingMode?: 'FIXED' | 'NEGOTIABLE';
   pricingPolicy?: 'FIXED' | 'NEGOTIABLE';
+  invoicePrefix?: string;
+  purchasePrefix?: string;
   subscriptionPlan?: '6_MONTHS' | 'YEARLY' | string;
   subscriptionStartDate?: string;
   subscriptionEndDate?: string;
@@ -1230,6 +1253,8 @@ async function provisionNewTenantStore(params: {
       : String(params.pricingMode || params.pricingPolicy || 'FIXED').toUpperCase() === 'NEGOTIABLE'
       ? 'NEGOTIABLE'
       : 'FIXED';
+  const invoicePrefix = String(params.invoicePrefix || 'INV-').trim() || 'INV-';
+  const purchasePrefix = String(params.purchasePrefix || 'PUR-').trim() || 'PUR-';
   const subscriptionPlan = normalizeSubscriptionPlan(params.subscriptionPlan || 'YEARLY');
 
   const startDate = params.subscriptionStartDate ? new Date(params.subscriptionStartDate) : new Date();
@@ -1249,31 +1274,74 @@ async function provisionNewTenantStore(params: {
   await pgClient.query('DELETE FROM company_settings WHERE tenant_id = $1', [nextTenantId]).catch(() => {});
   await pgClient.query("DELETE FROM users WHERE tenant_id = $1 AND role != 'SUPERADMIN'", [nextTenantId]).catch(() => {});
 
-  const tenantInsert = await pgClient.query<{
-    id: number;
-    name: string;
-    business_type: string;
-    subscription_plan: string;
-    subscription_start_date: string;
-    subscription_end_date: string;
-    subscription_status: string;
-  }>(
-    `INSERT INTO tenants (
-      id, name, status, business_type, subscription_plan, subscription_start_date, subscription_end_date, subscription_status,
-      theme_color, background_color, onboarding_completed, deleted_product_ids
-    ) VALUES ($1, $2, 'ACTIVE', $3, $4, $5, $6, $7, $8, '#0F172A', false, '{}')
-    RETURNING id, name, business_type, subscription_plan, subscription_start_date, subscription_end_date, subscription_status`,
-    [
-      nextTenantId,
-      params.storeName.trim(),
-      businessType,
-      subscriptionPlan,
-      validStartDate.toISOString(),
-      endDate.toISOString(),
-      subscriptionStatus,
-      themeColor,
-    ]
-  );
+  let tenantInsert;
+  try {
+    tenantInsert = await pgClient.query<{
+      id: number;
+      name: string;
+      business_type: string;
+      pricing_policy: string;
+      pricing_mode: string;
+      invoice_prefix: string;
+      purchase_prefix: string;
+      subscription_plan: string;
+      subscription_start_date: string;
+      subscription_end_date: string;
+      subscription_status: string;
+    }>(
+      `INSERT INTO tenants (
+        id, name, status, business_type, pricing_policy, pricing_mode, invoice_prefix, purchase_prefix,
+        subscription_plan, subscription_start_date, subscription_end_date, subscription_status,
+        theme_color, background_color, onboarding_completed, deleted_product_ids
+      ) VALUES ($1, $2, 'ACTIVE', $3, $4, $4, $5, $6, $7, $8, $9, $10, $11, '#0F172A', false, '{}')
+      RETURNING id, name, business_type, pricing_policy, pricing_mode, invoice_prefix, purchase_prefix, subscription_plan, subscription_start_date, subscription_end_date, subscription_status`,
+      [
+        nextTenantId,
+        params.storeName.trim(),
+        businessType,
+        pricingMode,
+        invoicePrefix,
+        purchasePrefix,
+        subscriptionPlan,
+        validStartDate.toISOString(),
+        endDate.toISOString(),
+        subscriptionStatus,
+        themeColor,
+      ]
+    );
+  } catch (tErr: any) {
+    if (String(tErr?.message || '').includes('column') && String(tErr?.message || '').includes('does not exist')) {
+      await pgClient.exec(`
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS pricing_policy TEXT NOT NULL DEFAULT 'FIXED';
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS pricing_mode TEXT NOT NULL DEFAULT 'FIXED';
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS invoice_prefix TEXT NOT NULL DEFAULT 'INV-';
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS purchase_prefix TEXT NOT NULL DEFAULT 'PUR-';
+      `).catch(() => {});
+      tenantInsert = await pgClient.query<any>(
+        `INSERT INTO tenants (
+          id, name, status, business_type, pricing_policy, pricing_mode, invoice_prefix, purchase_prefix,
+          subscription_plan, subscription_start_date, subscription_end_date, subscription_status,
+          theme_color, background_color, onboarding_completed, deleted_product_ids
+        ) VALUES ($1, $2, 'ACTIVE', $3, $4, $4, $5, $6, $7, $8, $9, $10, $11, '#0F172A', false, '{}')
+        RETURNING id, name, business_type, pricing_policy, pricing_mode, invoice_prefix, purchase_prefix, subscription_plan, subscription_start_date, subscription_end_date, subscription_status`,
+        [
+          nextTenantId,
+          params.storeName.trim(),
+          businessType,
+          pricingMode,
+          invoicePrefix,
+          purchasePrefix,
+          subscriptionPlan,
+          validStartDate.toISOString(),
+          endDate.toISOString(),
+          subscriptionStatus,
+          themeColor,
+        ]
+      );
+    } else {
+      throw tErr;
+    }
+  }
 
   // Keep tenants_id_seq synchronized with the highest current id
   await pgClient
@@ -1293,12 +1361,14 @@ async function provisionNewTenantStore(params: {
     `INSERT INTO company_settings (
       tenant_id, logo, address, phone, email, tax_id, tax_rate, currency, currency_symbol,
       invoice_prefix, purchase_prefix, barcode_prefix, invoice_footer, pricing_mode, business_type, default_pairs_per_carton, wholesale_invoice_format, is_installed, pricing_policy_locked
-    ) VALUES ($1, '/pwa-512x512.png', '', $2, $3, '', 0, $4, 'Rs.', 'INV-', 'PUR-', '0108923', 'Thank you for shopping with us! Exchanges within 7 days with original receipt.', $5, $6, 12, 'A4', false, true)`,
+    ) VALUES ($1, '/pwa-512x512.png', '', $2, $3, '', 0, $4, 'Rs.', $5, $6, '0108923', 'Thank you for shopping with us! Exchanges within 7 days with original receipt.', $7, $8, 12, 'A4', false, true)`,
     [
       newTenant.id,
       (params.ownerPhone || '').trim(),
       params.ownerEmail.trim().toLowerCase(),
       currency,
+      invoicePrefix,
+      purchasePrefix,
       pricingMode,
       businessType,
     ]
@@ -1884,6 +1954,9 @@ router.post('/superadmin/store-requests/:id/approve', requireAuth, requireSuperA
       password: password && String(password).trim() ? String(password).trim() : undefined,
       businessType: reqBusinessType,
       pricingMode: reqPricingMode,
+      pricingPolicy: reqPricingMode,
+      invoicePrefix: (storeReq as any).invoice_prefix || req.body?.invoicePrefix || 'INV-',
+      purchasePrefix: (storeReq as any).purchase_prefix || req.body?.purchasePrefix || 'PUR-',
       subscriptionPlan: req.body?.subscriptionPlan || (storeReq as any).plan || 'YEARLY',
     });
 
@@ -2076,6 +2149,9 @@ router.post('/superadmin/tenants', requireAuth, requireSuperAdmin, async (req: A
         ? 'NEGOTIABLE'
         : 'FIXED';
 
+    const finalInvoicePrefix = String(req.body.invoicePrefix || req.body.invoice_prefix || 'INV-').trim() || 'INV-';
+    const finalPurchasePrefix = String(req.body.purchasePrefix || req.body.purchase_prefix || 'PUR-').trim() || 'PUR-';
+
     await pgClient.query('BEGIN');
     const provisioned = await provisionNewTenantStore({
       storeName,
@@ -2087,6 +2163,9 @@ router.post('/superadmin/tenants', requireAuth, requireSuperAdmin, async (req: A
       currency,
       businessType: finalBusinessType,
       pricingMode: finalPricingMode,
+      pricingPolicy: finalPricingMode,
+      invoicePrefix: finalInvoicePrefix,
+      purchasePrefix: finalPurchasePrefix,
       subscriptionPlan: subscriptionPlan || 'YEARLY',
       subscriptionStartDate,
       subscriptionEndDate,
@@ -2173,7 +2252,7 @@ router.get('/tenants/onboarding', requireAuth, requireAdmin, async (req: Request
           'Thank you for shopping with us! Exchanges accepted within 7 days with original receipt.',
         lowStockLimit: Number(cs.low_stock_limit) || 5,
         pricingPolicy: cs.pricing_mode || 'FIXED',
-        businessType: (t.business_type || cs.business_type || 'RETAIL') as 'RETAIL' | 'WHOLESALE',
+        businessType: (cs.business_type || 'RETAIL') as 'RETAIL' | 'WHOLESALE',
         defaultPairsPerCarton: Number(cs.default_pairs_per_carton || 12),
         wholesaleInvoiceFormat: (cs.wholesale_invoice_format || 'A4') as 'A4' | 'A5' | 'THERMAL',
         themeColor: t.theme_color || '#7C3AED',
@@ -2203,12 +2282,21 @@ router.post('/tenants/onboarding', requireAuth, requireAdmin, async (req: Reques
       id: number;
       name: string;
       status: string;
+      business_type: string;
+      pricing_mode: string;
+      invoice_prefix: string;
+      purchase_prefix: string;
       owner_email: string;
       onboarding_completed: boolean;
     }>(
       `SELECT t.id, t.name, t.status, t.onboarding_completed,
+              COALESCE(NULLIF(cs.business_type, ''), NULLIF(t.business_type, ''), 'RETAIL') AS business_type,
+              COALESCE(NULLIF(cs.pricing_mode, ''), NULLIF(t.pricing_policy, ''), NULLIF(t.pricing_mode, ''), 'FIXED') AS pricing_mode,
+              COALESCE(NULLIF(cs.invoice_prefix, ''), NULLIF(t.invoice_prefix, ''), 'INV-') AS invoice_prefix,
+              COALESCE(NULLIF(cs.purchase_prefix, ''), NULLIF(t.purchase_prefix, ''), 'PUR-') AS purchase_prefix,
               u.email AS owner_email
        FROM tenants t
+       LEFT JOIN company_settings cs ON cs.tenant_id = t.id
        LEFT JOIN LATERAL (
          SELECT email
          FROM users
@@ -2247,12 +2335,9 @@ router.post('/tenants/onboarding', requireAuth, requireAdmin, async (req: Reques
       phone,
       email,
       ownerName,
-      invoicePrefix,
-      purchasePrefix,
       barcodePrefix,
       invoiceFooter,
       lowStockLimit,
-      pricingPolicy,
       themeColor,
       backgroundColor,
       logoUrl,
@@ -2288,8 +2373,8 @@ router.post('/tenants/onboarding', requireAuth, requireAdmin, async (req: Reques
           ? '€'
           : 'Rs.')
     ).trim();
-    const finalInvoicePrefix = String(invoicePrefix || 'INV-').trim() || 'INV-';
-    const finalPurchasePrefix = String(purchasePrefix || 'PUR-').trim() || 'PUR-';
+    const finalInvoicePrefix = tenant.invoice_prefix || 'INV-';
+    const finalPurchasePrefix = tenant.purchase_prefix || 'PUR-';
     const finalBarcodePrefix = String(barcodePrefix || '').trim();
     const finalInvoiceFooter =
       String(
@@ -2298,13 +2383,13 @@ router.post('/tenants/onboarding', requireAuth, requireAdmin, async (req: Reques
       ).trim();
     const finalLowStockLimit = Math.max(1, parseInt(String(lowStockLimit ?? 5), 10) || 5);
     const finalBusinessType: 'RETAIL' | 'WHOLESALE' =
-      String(req.body.businessType || req.body.business_type || (tenant as any).business_type || 'RETAIL').toUpperCase() === 'WHOLESALE'
+      String(tenant.business_type || 'RETAIL').toUpperCase() === 'WHOLESALE'
         ? 'WHOLESALE'
         : 'RETAIL';
     const finalPricingMode =
       finalBusinessType === 'WHOLESALE'
         ? 'FIXED'
-        : String(pricingPolicy || 'FIXED').toUpperCase() === 'NEGOTIABLE'
+        : String(tenant.pricing_mode || 'FIXED').toUpperCase() === 'NEGOTIABLE'
         ? 'NEGOTIABLE'
         : 'FIXED';
     const finalThemeColor = String(themeColor || '#7C3AED').trim();

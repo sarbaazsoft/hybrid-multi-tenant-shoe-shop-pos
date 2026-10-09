@@ -976,18 +976,33 @@ export const TenantOnboardingWizard: React.FC<TenantOnboardingWizardProps> = ({
                         Document Prefixes &amp; Inventory Defaults
                       </div>
 
+                      {/* Exclamation Mark Note: Settings locked after store approval */}
+                      <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 dark:border-amber-500/25 text-amber-800 dark:text-amber-200 text-xs flex items-start gap-2.5">
+                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500 text-white font-extrabold text-xs shrink-0 shadow-xs">
+                          !
+                        </span>
+                        <div className="space-y-0.5">
+                          <p className="text-[11.5px] leading-relaxed text-amber-900 dark:text-amber-100 font-semibold">
+                            Caution: These settings cannot be changed after the store request is approved. Please choose your Business Type, Pricing Policy, and Prefixes carefully.
+                          </p>
+                        </div>
+                      </div>
+
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                            Invoice Prefix *
+                          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+                            <span>Invoice Prefix *</span>
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono">Locked</span>
                           </label>
                           <input
                             type="text"
                             required
+                            readOnly
+                            disabled
                             value={invoicePrefix}
                             onChange={(e) => setInvoicePrefix(e.target.value)}
                             placeholder="INV-"
-                            className="app-input w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-purple-800/60 text-slate-900 dark:text-white text-sm font-mono"
+                            className="app-input w-full px-3.5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-900/60 border border-slate-200 dark:border-purple-800/60 text-slate-600 dark:text-slate-300 text-sm font-mono cursor-not-allowed opacity-80"
                           />
                           <span className="text-[10.5px] text-slate-500 dark:text-slate-400 mt-1 block">
                             Example: <code className="font-mono">{invoicePrefix || 'INV-'}00001</code>
@@ -995,15 +1010,18 @@ export const TenantOnboardingWizard: React.FC<TenantOnboardingWizardProps> = ({
                         </div>
 
                         <div>
-                          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                            Purchase Prefix
+                          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+                            <span>Purchase Prefix</span>
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono">Locked</span>
                           </label>
                           <input
                             type="text"
+                            readOnly
+                            disabled
                             value={purchasePrefix}
                             onChange={(e) => setPurchasePrefix(e.target.value)}
                             placeholder="PUR-"
-                            className="app-input w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-purple-800/60 text-slate-900 dark:text-white text-sm font-mono"
+                            className="app-input w-full px-3.5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-900/60 border border-slate-200 dark:border-purple-800/60 text-slate-600 dark:text-slate-300 text-sm font-mono cursor-not-allowed opacity-80"
                           />
                           <span className="text-[10.5px] text-slate-500 dark:text-slate-400 mt-1 block">
                             Supplier stock receiving bills
@@ -1035,25 +1053,30 @@ export const TenantOnboardingWizard: React.FC<TenantOnboardingWizardProps> = ({
                             </span>
                           </div>
 
-                          {/* Business Type Selector */}
+                          {/* Business Type Selector (Locked from creation) */}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <label
-                              className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition ${
+                              className={`flex items-start gap-3 p-3 rounded-xl border transition ${
                                 businessType === 'RETAIL'
                                   ? 'border-purple-600 bg-purple-50/70 dark:bg-purple-950/40 dark:border-purple-500 ring-1 ring-purple-500/20'
-                                  : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
-                              }`}
+                                  : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 opacity-60'
+                              } cursor-not-allowed`}
                             >
                               <input
                                 type="radio"
+                                disabled
                                 name="onboardingBusinessType"
                                 value="RETAIL"
                                 checked={businessType === 'RETAIL'}
-                                onChange={() => setBusinessType('RETAIL')}
-                                className="mt-0.5 text-purple-600 focus:ring-purple-500"
+                                className="mt-0.5 text-purple-600 focus:ring-purple-500 cursor-not-allowed"
                               />
                               <div className="text-xs">
-                                <span className="font-bold text-slate-900 dark:text-white block">Retail Store (B2C)</span>
+                                <span className="font-bold text-slate-900 dark:text-white block flex items-center gap-1.5">
+                                  <span>Retail Store (B2C)</span>
+                                  {businessType === 'RETAIL' && (
+                                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono font-semibold">Locked</span>
+                                  )}
+                                </span>
                                 <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
                                   Individual pair sales, barcode scanning, walk-in shoppers &amp; returns
                                 </span>
@@ -1061,25 +1084,27 @@ export const TenantOnboardingWizard: React.FC<TenantOnboardingWizardProps> = ({
                             </label>
 
                             <label
-                              className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition ${
+                              className={`flex items-start gap-3 p-3 rounded-xl border transition ${
                                 businessType === 'WHOLESALE'
                                   ? 'border-purple-600 bg-purple-50/70 dark:bg-purple-950/40 dark:border-purple-500 ring-1 ring-purple-500/20'
-                                  : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
-                              }`}
+                                  : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 opacity-60'
+                              } cursor-not-allowed`}
                             >
                               <input
                                 type="radio"
+                                disabled
                                 name="onboardingBusinessType"
                                 value="WHOLESALE"
                                 checked={businessType === 'WHOLESALE'}
-                                onChange={() => {
-                                  setBusinessType('WHOLESALE');
-                                  setPricingPolicy('FIXED');
-                                }}
-                                className="mt-0.5 text-purple-600 focus:ring-purple-500"
+                                className="mt-0.5 text-purple-600 focus:ring-purple-500 cursor-not-allowed"
                               />
                               <div className="text-xs">
-                                <span className="font-bold text-slate-900 dark:text-white block">Wholesale Store (B2B)</span>
+                                <span className="font-bold text-slate-900 dark:text-white block flex items-center gap-1.5">
+                                  <span>Wholesale Store (B2B)</span>
+                                  {businessType === 'WHOLESALE' && (
+                                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono font-semibold">Locked</span>
+                                  )}
+                                </span>
                                 <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
                                   Bulk carton packing, min order pairs, khata credit ledger &amp; transport bilty
                                 </span>
@@ -1087,30 +1112,31 @@ export const TenantOnboardingWizard: React.FC<TenantOnboardingWizardProps> = ({
                             </label>
                           </div>
 
-                          {/* Pricing Policy (2 Radio Buttons if Retail; Hidden if Wholesale!) */}
+                          {/* Pricing Policy (Locked from creation) */}
                           {businessType === 'RETAIL' ? (
                             <div className="p-3.5 rounded-xl bg-purple-50/40 dark:bg-purple-950/20 border border-purple-200/60 dark:border-purple-900/40 space-y-2">
-                              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                                Which pricing policy does your shop have? *
+                              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                                <span>Store Pricing Policy</span>
+                                <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono font-semibold">Locked</span>
                               </label>
                               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                                Select how product selling prices are handled at checkout counter:
+                                Pricing policy chosen at store creation:
                               </p>
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                                 <label
-                                  className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition ${
+                                  className={`flex items-start gap-2.5 p-3 rounded-xl border transition ${
                                     pricingPolicy === 'FIXED'
                                       ? 'border-purple-600 bg-purple-50 dark:bg-purple-950/40 dark:border-purple-500 ring-1 ring-purple-500/20'
-                                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
-                                  }`}
+                                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 opacity-60'
+                                  } cursor-not-allowed`}
                                 >
                                   <input
                                     type="radio"
+                                    disabled
                                     name="onboardingPricingPolicy"
                                     value="FIXED"
                                     checked={pricingPolicy === 'FIXED'}
-                                    onChange={() => setPricingPolicy('FIXED')}
-                                    className="mt-0.5 text-purple-600 focus:ring-purple-500"
+                                    className="mt-0.5 text-purple-600 focus:ring-purple-500 cursor-not-allowed"
                                   />
                                   <div className="text-xs">
                                     <span className="font-bold text-slate-900 dark:text-white block">Fixed Price</span>
@@ -1121,19 +1147,19 @@ export const TenantOnboardingWizard: React.FC<TenantOnboardingWizardProps> = ({
                                 </label>
 
                                 <label
-                                  className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition ${
+                                  className={`flex items-start gap-2.5 p-3 rounded-xl border transition ${
                                     pricingPolicy === 'NEGOTIABLE'
                                       ? 'border-purple-600 bg-purple-50 dark:bg-purple-950/40 dark:border-purple-500 ring-1 ring-purple-500/20'
-                                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
-                                  }`}
+                                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 opacity-60'
+                                  } cursor-not-allowed`}
                                 >
                                   <input
                                     type="radio"
+                                    disabled
                                     name="onboardingPricingPolicy"
                                     value="NEGOTIABLE"
                                     checked={pricingPolicy === 'NEGOTIABLE'}
-                                    onChange={() => setPricingPolicy('NEGOTIABLE')}
-                                    className="mt-0.5 text-purple-600 focus:ring-purple-500"
+                                    className="mt-0.5 text-purple-600 focus:ring-purple-500 cursor-not-allowed"
                                   />
                                   <div className="text-xs">
                                     <span className="font-bold text-slate-900 dark:text-white block">Bargaining / Range Price</span>

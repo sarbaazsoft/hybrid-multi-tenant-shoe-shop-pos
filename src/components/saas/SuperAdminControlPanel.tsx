@@ -49,6 +49,7 @@ import {
   Building2,
   Layers,
   Receipt,
+  Hash,
   ChevronDown,
   UserCog,
   ShieldCheck,
@@ -233,6 +234,8 @@ export const SuperAdminControlPanel: React.FC<SuperAdminControlPanelProps> = ({
   const [newSubscriptionPlan, setNewSubscriptionPlan] = useState<'6_MONTHS' | 'YEARLY'>('YEARLY');
   const [newBusinessType, setNewBusinessType] = useState<'RETAIL' | 'WHOLESALE'>('RETAIL');
   const [newPricingPolicy, setNewPricingPolicy] = useState<'FIXED' | 'NEGOTIABLE'>('FIXED');
+  const [newInvoicePrefix, setNewInvoicePrefix] = useState('INV-');
+  const [newPurchasePrefix, setNewPurchasePrefix] = useState('PUR-');
   const [showNewOwnerPassword, setShowNewOwnerPassword] = useState(false);
   const [creatingStore, setCreatingStore] = useState(false);
   const [createStoreError, setCreateStoreError] = useState<string | null>(null);
@@ -654,6 +657,8 @@ export const SuperAdminControlPanel: React.FC<SuperAdminControlPanelProps> = ({
         businessType: newBusinessType,
         pricingPolicy: newBusinessType === 'WHOLESALE' ? 'FIXED' : newPricingPolicy,
         pricingMode: newBusinessType === 'WHOLESALE' ? 'FIXED' : newPricingPolicy,
+        invoicePrefix: newInvoicePrefix.trim() || 'INV-',
+        purchasePrefix: newPurchasePrefix.trim() || 'PUR-',
       });
       if (res.provisioned) {
         setProvisionedBanner(res.provisioned);
@@ -670,6 +675,8 @@ export const SuperAdminControlPanel: React.FC<SuperAdminControlPanelProps> = ({
       setNewSubscriptionPlan('YEARLY');
       setNewBusinessType('RETAIL');
       setNewPricingPolicy('FIXED');
+      setNewInvoicePrefix('INV-');
+      setNewPurchasePrefix('PUR-');
       await loadOverview();
       onTenantsUpdated();
     } catch (err: any) {
@@ -4041,6 +4048,18 @@ export const SuperAdminControlPanel: React.FC<SuperAdminControlPanelProps> = ({
                   </span>
                 </div>
 
+                {/* Exclamation Mark Note: Settings cannot be changed after approval */}
+                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 dark:border-amber-500/25 text-amber-800 dark:text-amber-200 text-xs flex items-start gap-2.5">
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500 text-white font-extrabold text-xs shrink-0 shadow-xs">
+                    !
+                  </span>
+                  <div className="space-y-0.5">
+                    <p className="text-[11.5px] leading-relaxed text-amber-900 dark:text-amber-100 font-semibold">
+                      Caution: These settings cannot be changed after the store request is approved. Please choose your Business Type, Pricing Policy, and Prefixes carefully.
+                    </p>
+                  </div>
+                </div>
+
                 {/* Business Type Selector */}
                 <div>
                   <label className="block text-xs font-bold text-gray-800 dark:text-slate-200 mb-2">
@@ -4163,6 +4182,51 @@ export const SuperAdminControlPanel: React.FC<SuperAdminControlPanelProps> = ({
                     </span>
                   </div>
                 )}
+
+                {/* Invoice & Purchase Prefix Inputs (Permanently locked once store is created) */}
+                <div className="pt-3 border-t border-gray-100 dark:border-slate-800/80">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-800 dark:text-slate-200 mb-1.5">
+                        Sales Invoice Prefix <span className="text-red-500 dark:text-pink-400">*</span>
+                      </label>
+                      <div className="relative">
+                        <Receipt className="w-4 h-4 text-purple-600 dark:text-purple-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="text"
+                          required
+                          value={newInvoicePrefix}
+                          onChange={(e) => setNewInvoicePrefix(e.target.value.toUpperCase())}
+                          placeholder="e.g. INV-"
+                          className="w-full pl-9 pr-3 py-2 bg-white dark:bg-purple-500/20 border border-gray-300 dark:border-purple-400/40 rounded-xl text-xs font-mono font-bold text-gray-900 dark:text-purple-100 placeholder-slate-400 dark:placeholder-purple-300/40 hover:bg-slate-50 dark:hover:bg-purple-500/30 outline-none focus:border-indigo-600 dark:focus:border-purple-400 transition"
+                        />
+                      </div>
+                      <span className="text-[10.5px] text-slate-500 dark:text-slate-400 mt-1 block">
+                        e.g., {newInvoicePrefix || 'INV-'}00001
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-gray-800 dark:text-slate-200 mb-1.5">
+                        Purchase Bill Prefix <span className="text-red-500 dark:text-pink-400">*</span>
+                      </label>
+                      <div className="relative">
+                        <Hash className="w-4 h-4 text-purple-600 dark:text-purple-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="text"
+                          required
+                          value={newPurchasePrefix}
+                          onChange={(e) => setNewPurchasePrefix(e.target.value.toUpperCase())}
+                          placeholder="e.g. PUR-"
+                          className="w-full pl-9 pr-3 py-2 bg-white dark:bg-purple-500/20 border border-gray-300 dark:border-purple-400/40 rounded-xl text-xs font-mono font-bold text-gray-900 dark:text-purple-100 placeholder-slate-400 dark:placeholder-purple-300/40 hover:bg-slate-50 dark:hover:bg-purple-500/30 outline-none focus:border-indigo-600 dark:focus:border-purple-400 transition"
+                        />
+                      </div>
+                      <span className="text-[10.5px] text-slate-500 dark:text-slate-400 mt-1 block">
+                        e.g., {newPurchasePrefix || 'PUR-'}00001
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* CARD 3: OWNER SECURITY CREDENTIALS */}

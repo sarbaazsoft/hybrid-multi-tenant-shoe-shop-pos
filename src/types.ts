@@ -24,6 +24,10 @@ export interface TenantInfo {
   name: string;
   status: 'ACTIVE' | 'SUSPENDED' | 'EXPIRED';
   businessType?: BusinessType;
+  pricingPolicy?: PricingPolicy;
+  pricingMode?: PricingPolicy;
+  invoicePrefix?: string;
+  purchasePrefix?: string;
   subscriptionPlan?: SubscriptionPlan;
   subscriptionStartDate?: string;
   subscriptionEndDate?: string;
@@ -44,6 +48,10 @@ export interface SuperAdminStoreRow {
   name: string;
   status: 'ACTIVE' | 'SUSPENDED' | 'EXPIRED';
   businessType?: BusinessType;
+  pricingPolicy?: PricingPolicy;
+  pricingMode?: PricingPolicy;
+  invoicePrefix?: string;
+  purchasePrefix?: string;
   subscriptionPlan: SubscriptionPlan;
   subscriptionStartDate: string;
   subscriptionEndDate: string;
@@ -136,6 +144,8 @@ export interface StoreRequestRecord {
   businessType?: BusinessType;
   pricingPolicy?: PricingPolicy;
   pricingMode?: PricingPolicy;
+  invoicePrefix?: string;
+  purchasePrefix?: string;
   requestType?: string;
   notes?: string;
   provisionedTenantId?: number | null;

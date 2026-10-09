@@ -295,6 +295,8 @@ export const api = {
       businessType?: 'RETAIL' | 'WHOLESALE' | string;
       pricingPolicy?: 'FIXED' | 'NEGOTIABLE' | string;
       pricingMode?: 'FIXED' | 'NEGOTIABLE' | string;
+      invoicePrefix?: string;
+      purchasePrefix?: string;
     }) => apiFetch<{
       success: boolean;
       requestId: number;
@@ -390,6 +392,8 @@ export const api = {
       businessType?: 'RETAIL' | 'WHOLESALE' | string;
       pricingPolicy?: 'FIXED' | 'NEGOTIABLE' | string;
       pricingMode?: 'FIXED' | 'NEGOTIABLE' | string;
+      invoicePrefix?: string;
+      purchasePrefix?: string;
       subscriptionPlan?: '6_MONTHS' | 'YEARLY' | string;
       subscriptionStartDate?: string;
       subscriptionEndDate?: string;
@@ -402,6 +406,8 @@ export const api = {
         businessType?: 'RETAIL' | 'WHOLESALE' | string;
         pricingPolicy?: 'FIXED' | 'NEGOTIABLE' | string;
         pricingMode?: 'FIXED' | 'NEGOTIABLE' | string;
+        invoicePrefix?: string;
+        purchasePrefix?: string;
         subscriptionPlan?: '6_MONTHS' | 'YEARLY' | string;
       }
     ) =>
@@ -984,6 +990,7 @@ export const api = {
     requestSubscriptionRenewal: (data: { plan: '6_MONTHS' | 'YEARLY' | string; notes?: string }) =>
       apiFetch('/settings/renew-subscription', { method: 'POST', body: data }),
     update: (data: any) => apiFetch('/settings', { method: 'PUT', body: data }),
+    changeSetting: (data: any) => apiFetch('/settings/changeSetting', { method: 'PUT', body: data }),
     getUsers: () => apiFetch('/settings/users'),
     createUser: (data: any) => apiFetch('/settings/users', { method: 'POST', body: data }),
     updateUserStatus: (id: number, status: string) =>

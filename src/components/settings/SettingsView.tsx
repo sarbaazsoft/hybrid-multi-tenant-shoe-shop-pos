@@ -241,6 +241,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     invoice_prefix: companySettings?.invoice_prefix || companySettings?.invoicePrefix || 'INV-',
 
     currency: companySettings?.currency || 'PKR',
+    business_type: String(companySettings?.business_type || companySettings?.businessType || 'RETAIL').toUpperCase() as 'RETAIL' | 'WHOLESALE',
     invoice_footer: companySettings?.invoice_footer || companySettings?.invoiceFooter || 'Exchanges accepted within 7 days with original sales receipt. Thank you for shopping with us!',
     low_stock_limit: companySettings?.low_stock_limit || companySettings?.lowStockLimit || 5,
     pricing_mode: (companySettings?.pricingPolicy || 'FIXED').toUpperCase(),
@@ -291,6 +292,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           invoice_prefix: s?.invoice_prefix || s?.invoicePrefix || 'INV-',
 
           currency: s?.currency || 'PKR',
+          business_type: String(s?.business_type || s?.businessType || 'RETAIL').toUpperCase() as 'RETAIL' | 'WHOLESALE',
           invoice_footer: s?.invoice_footer || s?.invoiceFooter || '',
           low_stock_limit: s?.low_stock_limit || s?.lowStockLimit || 5,
           pricing_mode: (s?.pricingPolicy || 'FIXED').toUpperCase(),
@@ -1682,15 +1684,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5">Printed on POS receipts &amp; invoice totals</p>
               </div>
 
-              {/* purchase_prefix (Text, Required) */}
+              {/* purchase_prefix (Text, Company Setting, locked when pricing_policy_locked is true) */}
               <div>
                 <label className="text-xs font-semibold text-slate-800 dark:text-slate-200 mb-1.5 flex items-center justify-between">
                   <span>
                     Purchase Order Prefix <span className="text-rose-500 font-bold">*</span>
                   </span>
                   {formData.pricing_policy_locked && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-mono text-amber-600 dark:text-amber-400">
-                      <Lock className="w-2.5 h-2.5" /> Locked
+                    <span className="inline-flex items-center gap-1 text-[10px] font-mono text-amber-600 dark:text-amber-400 font-bold">
+                      <Lock className="w-2.5 h-2.5 text-amber-500" /> Locked
                     </span>
                   )}
                 </label>
@@ -1703,7 +1705,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     readOnly={Boolean(formData.pricing_policy_locked)}
                     onChange={(e) => {
                       if (formData.pricing_policy_locked) return;
-                      setFormData({ ...formData, purchase_prefix: e.target.value });
+                      setFormData({ ...formData, purchase_prefix: e.target.value.toUpperCase() });
                       if (formErrors.purchase_prefix) {
                         setFormErrors({ ...formErrors, purchase_prefix: '' });
                       }
@@ -1725,15 +1727,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5">e.g., {formData.purchase_prefix || 'PUR-'}2026-0001</p>
               </div>
 
-              {/* invoice_prefix (Text, Required) */}
+              {/* invoice_prefix (Text, Company Setting, locked when pricing_policy_locked is true) */}
               <div>
                 <label className="text-xs font-semibold text-slate-800 dark:text-slate-200 mb-1.5 flex items-center justify-between">
                   <span>
                     Sales Invoice Prefix <span className="text-rose-500 font-bold">*</span>
                   </span>
                   {formData.pricing_policy_locked && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-mono text-amber-600 dark:text-amber-400">
-                      <Lock className="w-2.5 h-2.5" /> Locked
+                    <span className="inline-flex items-center gap-1 text-[10px] font-mono text-amber-600 dark:text-amber-400 font-bold">
+                      <Lock className="w-2.5 h-2.5 text-amber-500" /> Locked
                     </span>
                   )}
                 </label>
@@ -1746,7 +1748,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     readOnly={Boolean(formData.pricing_policy_locked)}
                     onChange={(e) => {
                       if (formData.pricing_policy_locked) return;
-                      setFormData({ ...formData, invoice_prefix: e.target.value });
+                      setFormData({ ...formData, invoice_prefix: e.target.value.toUpperCase() });
                       if (formErrors.invoice_prefix) {
                         setFormErrors({ ...formErrors, invoice_prefix: '' });
                       }
@@ -1834,21 +1836,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
             </div>
 
+            {/* Caution Notice: Immutable Store Settings */}
+            <div className="mb-5 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 dark:border-amber-500/25 text-amber-800 dark:text-amber-200 text-xs flex items-start gap-2.5">
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500 text-white font-extrabold text-xs shrink-0 shadow-xs">
+                !
+              </span>
+              <div className="space-y-0.5">
+                <p className="text-[11.5px] leading-relaxed text-amber-900 dark:text-amber-100 font-semibold">
+                  Caution: These settings cannot be changed after the store request is approved. Please choose your Business Type, Pricing Policy, and Prefixes carefully.
+                </p>
+                <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                  Business Model: <span className="font-bold">{formData.business_type === 'WHOLESALE' ? 'Wholesale Store (B2B)' : 'Retail Store (B2C)'}</span> • Pricing Policy: <span className="font-bold">{formData.pricing_mode === 'FIXED' ? 'Fixed Price' : 'Negotiable Price'}</span> • Invoice Prefix: <span className="font-mono font-bold">{formData.invoice_prefix}</span> • Purchase Prefix: <span className="font-mono font-bold">{formData.purchase_prefix}</span>
+                </p>
+              </div>
+            </div>
+
             {/* Pricing Policy Selector (Locked once initial store setup is completed) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Fixed Price Option */}
               <button
                 type="button"
-                disabled={Boolean(formData.pricing_policy_locked)}
-                aria-disabled={Boolean(formData.pricing_policy_locked)}
-                onClick={() => {
-                  if (!formData.pricing_policy_locked) {
-                    setFormData({ ...formData, pricing_mode: 'FIXED' });
-                  }
-                }}
-                className={`p-4 rounded-xl text-left transition-all border relative select-none ${
-                  formData.pricing_policy_locked ? 'cursor-not-allowed' : 'cursor-pointer'
-                } ${
+                disabled={true}
+                aria-disabled="true"
+                className={`p-4 rounded-xl text-left transition-all border relative select-none cursor-not-allowed ${
                   formData.pricing_mode === 'FIXED'
                     ? 'bg-purple-50/90 dark:bg-purple-950/40 border-purple-500 dark:border-purple-500 shadow-xs ring-2 ring-purple-400/20'
                     : 'bg-slate-50/70 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 opacity-55'
@@ -1872,7 +1882,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   {formData.pricing_mode === 'FIXED' && (
                     <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-600 text-white">
                       <Lock className="w-2.5 h-2.5" />
-                      {formData.pricing_policy_locked ? 'Active & Locked' : 'Selected'}
+                      Active &amp; Locked
                     </span>
                   )}
                 </div>
@@ -1886,16 +1896,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               {/* Negotiable Price Option */}
               <button
                 type="button"
-                disabled={Boolean(formData.pricing_policy_locked)}
-                aria-disabled={Boolean(formData.pricing_policy_locked)}
-                onClick={() => {
-                  if (!formData.pricing_policy_locked) {
-                    setFormData({ ...formData, pricing_mode: 'NEGOTIABLE' });
-                  }
-                }}
-                className={`p-4 rounded-xl text-left transition-all border relative select-none ${
-                  formData.pricing_policy_locked ? 'cursor-not-allowed' : 'cursor-pointer'
-                } ${
+                disabled={true}
+                aria-disabled="true"
+                className={`p-4 rounded-xl text-left transition-all border relative select-none cursor-not-allowed ${
                   formData.pricing_mode === 'NEGOTIABLE'
                     ? 'bg-indigo-50/90 dark:bg-indigo-950/40 border-indigo-500 dark:border-indigo-500 shadow-xs ring-2 ring-indigo-400/20'
                     : 'bg-slate-50/70 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 opacity-55'
@@ -1919,7 +1922,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   {formData.pricing_mode === 'NEGOTIABLE' && (
                     <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-600 text-white">
                       <Lock className="w-2.5 h-2.5" />
-                      {formData.pricing_policy_locked ? 'Active & Locked' : 'Selected'}
+                      Active &amp; Locked
                     </span>
                   )}
                 </div>

@@ -182,27 +182,26 @@ function buildSubscriptionInfo(tenantRow?: any, pendingRenewalRequest?: any | nu
 }
 
 function formatSettingsResponse(s: any, tenantRow?: any, pendingRenewalRequest?: any | null) {
-  const mode = String(s.pricing_mode || 'FIXED').toUpperCase() === 'NEGOTIABLE' ? 'NEGOTIABLE' : 'FIXED';
-  const isSetupLocked = Boolean(
-    tenantRow
-      ? tenantRow.onboarding_completed || s.pricing_policy_locked || s.is_installed
-      : s.pricing_policy_locked || s.is_installed
-  );
-  const locked = isSetupLocked;
+  const isLocked = Boolean(s.pricing_policy_locked ?? s.is_installed ?? true);
+  const mode = String(s.pricing_mode || s.pricing_policy || tenantRow?.pricing_policy || tenantRow?.pricing_mode || 'FIXED').toUpperCase() === 'NEGOTIABLE' ? 'NEGOTIABLE' : 'FIXED';
+  const isSetupLocked = true;
+  const locked = isLocked;
   const logo = s.logo || '';
   const receiptLogo = s.receipt_logo || logo || '';
   const showReceiptLogo = Boolean(s.show_receipt_logo);
   const subInfo = buildSubscriptionInfo(tenantRow, pendingRenewalRequest);
   const storeName = tenantRow?.name || s.name || 'Retail Store';
   const businessType: 'RETAIL' | 'WHOLESALE' =
-    String(tenantRow?.business_type || s.business_type || 'RETAIL').toUpperCase() === 'WHOLESALE'
+    String(s.business_type || tenantRow?.business_type || 'RETAIL').toUpperCase() === 'WHOLESALE'
       ? 'WHOLESALE'
       : 'RETAIL';
   const defaultPairsPerCarton = Math.max(1, Number(s.default_pairs_per_carton || 12));
   const wholesaleInvoiceFormat = String(s.wholesale_invoice_format || 'A4').toUpperCase() === 'A5' ? 'A5' : 'A4';
+  const invoicePrefix = s.invoice_prefix || tenantRow?.invoice_prefix || 'INV-';
+  const purchasePrefix = s.purchase_prefix || tenantRow?.purchase_prefix || 'PUR-';
 
-    return {
-      id: s.id,
+  return {
+    id: s.id,
     tenantId: s.tenant_id || tenantRow?.id || 1,
     tenantStatus: tenantRow?.status || 'ACTIVE',
     businessType,
@@ -236,13 +235,19 @@ function formatSettingsResponse(s: any, tenantRow?: any, pendingRenewalRequest?:
     currency: s.currency || 'PKR',
     currencyName: s.currency_name || 'Pakistani Rupee',
     currencySymbol: s.currency_symbol || 'Rs.',
-    invoicePrefix: s.invoice_prefix || 'INV-',
-    purchasePrefix: s.purchase_prefix || 'PUR-',
+    invoicePrefix,
+    invoice_prefix: invoicePrefix,
+    purchasePrefix,
+    purchase_prefix: purchasePrefix,
     barcodePrefix: s.barcode_prefix || '',
     invoiceFooter: s.invoice_footer || '',
     lowStockLimit: s.low_stock_limit,
     pricingPolicy: mode,
+    pricing_policy: mode,
+    pricingMode: mode,
+    pricing_mode: mode,
     pricingPolicyLocked: locked,
+    pricing_policy_locked: locked,
     isInstalled: Boolean(s.is_installed),
     updatedAt: s.updated_at,
   };
@@ -498,8 +503,9 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-// PUT /api/settings - Update Company Settings (Admin Only, Strictly scoped to req.user.tenantId)
-router.put('/', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+// PUT/PATCH /api/settings - Update Company Settings (Admin Only, Strictly scoped to req.user.tenantId)
+// Immutable settings (business_type, pricing_mode, invoice_prefix, purchase_prefix) reside in company_settings and are locked once pricing_policy_locked is true.
+const handleUpdateSettings = async (req: AuthenticatedRequest, res: Response) => {
   try {
     await ensureSettingsPricingColumns();
     const tenantId = extractStrictTenantId(req);
@@ -515,8 +521,6 @@ router.put('/', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res
     const currencyName = (req.body.currency_name || req.body.currencyName || 'Pakistani Rupee').trim();
     const currencySymbol = (req.body.currency_symbol || req.body.currencySymbol || 'Rs.').trim();
     const barcodePrefix = (req.body.barcode_prefix || req.body.barcodePrefix || '').trim();
-    const purchasePrefix = (req.body.purchase_prefix || req.body.purchasePrefix || 'PO-').trim();
-    const invoicePrefix = (req.body.invoice_prefix || req.body.invoicePrefix || 'INV-').trim();
 
     const logo = req.body.logo || '';
     const receiptLogo = req.body.receipt_logo ?? req.body.receiptLogo ?? logo;
@@ -524,56 +528,59 @@ router.put('/', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res
     const invoiceFooter = req.body.invoice_footer || req.body.invoiceFooter || '';
     const lowStockLimit = parseInt(req.body.low_stock_limit || req.body.lowStockLimit, 10) || 5;
 
-    const currentSettingsRes = await pgClient.query<{
-      id: number;
-      is_installed: boolean;
-      pricing_policy_locked: boolean;
-      pricing_mode: string;
-      currency: string;
-      currency_name: string;
-      currency_symbol: string;
-      barcode_prefix: string;
-      purchase_prefix: string;
-      invoice_prefix: string;
-    }>(
-      'SELECT id, is_installed, pricing_policy_locked, pricing_mode, currency, currency_name, currency_symbol, barcode_prefix, purchase_prefix, invoice_prefix FROM company_settings WHERE tenant_id = $1 LIMIT 1',
-      [tenantId]
-    );
-
-    const tenantLockRes = await pgClient
-      .query<{ onboarding_completed: boolean }>(
-        'SELECT onboarding_completed FROM tenants WHERE id = $1 LIMIT 1',
+    const [currentSettingsRes, tenantRes] = await Promise.all([
+      pgClient.query<{
+        id: number;
+        is_installed: boolean;
+        pricing_policy_locked: boolean;
+        pricing_mode: string;
+        business_type: string;
+        currency: string;
+        currency_name: string;
+        currency_symbol: string;
+        barcode_prefix: string;
+        purchase_prefix: string;
+        invoice_prefix: string;
+      }>(
+        'SELECT id, is_installed, pricing_policy_locked, pricing_mode, business_type, currency, currency_name, currency_symbol, barcode_prefix, purchase_prefix, invoice_prefix FROM company_settings WHERE tenant_id = $1 LIMIT 1',
         [tenantId]
-      )
-      .catch(() => ({ rows: [] as Array<{ onboarding_completed: boolean }> }));
+      ),
+      pgClient.query<{
+        id: number;
+        name: string;
+        onboarding_completed: boolean;
+      }>(
+        'SELECT id, name, onboarding_completed FROM tenants WHERE id = $1 LIMIT 1',
+        [tenantId]
+      ),
+    ]);
 
     const currentRow = currentSettingsRes.rows[0];
-    const tenantLockRow = tenantLockRes.rows[0];
-    const isSetupAlreadyLocked = Boolean(
-      currentRow?.pricing_policy_locked ||
-        currentRow?.is_installed ||
-        tenantLockRow?.onboarding_completed
-    );
 
-    // Core business type, pricing policy, and document prefixes (invoice_prefix, purchase_prefix) are strictly locked once established
-    let pricingMode = currentRow?.pricing_mode
-      ? String(currentRow.pricing_mode).toUpperCase() === 'NEGOTIABLE'
-        ? 'NEGOTIABLE'
-        : 'FIXED'
-      : 'FIXED';
+    // Core business type, pricing policy, and document prefixes (invoice_prefix, purchase_prefix)
+    // reside in company_settings. If locked (pricing_policy_locked), their existing values in company_settings are preserved.
+    const isLocked = Boolean(currentRow?.pricing_policy_locked ?? currentRow?.is_installed ?? false);
 
-    const requestedMode = req.body.pricingPolicy || req.body.pricing_policy || req.body.pricing_mode || req.body.pricingMode;
-    if (requestedMode && !currentRow?.pricing_mode && !isSetupAlreadyLocked) {
-      pricingMode = String(requestedMode).toUpperCase() === 'NEGOTIABLE' ? 'NEGOTIABLE' : 'FIXED';
-    }
+    const finalBusinessType = isLocked
+      ? (currentRow?.business_type || 'RETAIL')
+      : (req.body.business_type || req.body.businessType || currentRow?.business_type || 'RETAIL');
 
-    const finalCurrencyCode = isSetupAlreadyLocked && currentRow?.currency ? currentRow.currency : (req.body.currency || 'PKR');
-    const finalCurrencyName = isSetupAlreadyLocked && currentRow?.currency_name ? currentRow.currency_name : currencyName;
-    const finalCurrencySymbol = isSetupAlreadyLocked && currentRow?.currency_symbol ? currentRow.currency_symbol : currencySymbol;
-    const finalBarcodePrefix = isSetupAlreadyLocked && currentRow?.barcode_prefix ? currentRow.barcode_prefix : barcodePrefix;
-    // Invoice Prefix and Purchase Prefix are locked and unchangeable once store is created/approved
-    const finalPurchasePrefix = currentRow?.purchase_prefix ? currentRow.purchase_prefix : purchasePrefix;
-    const finalInvoicePrefix = currentRow?.invoice_prefix ? currentRow.invoice_prefix : invoicePrefix;
+    const finalPricingMode = isLocked
+      ? (currentRow?.pricing_mode || 'FIXED')
+      : ((req.body.pricing_mode || req.body.pricing_policy || req.body.pricingMode || req.body.pricingPolicy || currentRow?.pricing_mode || 'FIXED').toUpperCase() === 'NEGOTIABLE' ? 'NEGOTIABLE' : 'FIXED');
+
+    const finalPurchasePrefix = isLocked
+      ? (currentRow?.purchase_prefix || 'PUR-')
+      : (String(req.body.purchase_prefix || req.body.purchasePrefix || currentRow?.purchase_prefix || 'PUR-').trim() || 'PUR-');
+
+    const finalInvoicePrefix = isLocked
+      ? (currentRow?.invoice_prefix || 'INV-')
+      : (String(req.body.invoice_prefix || req.body.invoicePrefix || currentRow?.invoice_prefix || 'INV-').trim() || 'INV-');
+
+    const finalCurrencyCode = req.body.currency ? String(req.body.currency).trim() : (currentRow?.currency || 'PKR');
+    const finalCurrencyName = currencyName || currentRow?.currency_name || 'Pakistani Rupee';
+    const finalCurrencySymbol = currencySymbol || currentRow?.currency_symbol || 'Rs.';
+    const finalBarcodePrefix = barcodePrefix || currentRow?.barcode_prefix || '';
 
     if (!companyName) {
       return res.status(400).json({ error: 'company_name is required.' });
@@ -594,12 +601,6 @@ router.put('/', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res
     if (!finalCurrencySymbol) {
       return res.status(400).json({ error: 'currency_symbol is required (e.g., "Rs.", "$", "PKR").' });
     }
-    if (!finalPurchasePrefix) {
-      return res.status(400).json({ error: 'purchase_prefix is required (e.g., "PO-").' });
-    }
-    if (!finalInvoicePrefix) {
-      return res.status(400).json({ error: 'invoice_prefix is required (e.g., "INV-").' });
-    }
 
     let updateRes;
     if (currentRow) {
@@ -610,8 +611,8 @@ router.put('/', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res
            currency_name = $8, currency = $9, currency_symbol = $10,
            barcode_prefix = $11, purchase_prefix = $12, invoice_prefix = $13,
            invoice_footer = $14, low_stock_limit = $15,
-           pricing_mode = $16, pricing_policy_locked = true, is_installed = true, show_receipt_logo = $17, receipt_logo = $18, updated_at = NOW()
-         WHERE id = $19 AND tenant_id = $20
+           pricing_mode = $16, business_type = $17, pricing_policy_locked = true, is_installed = true, show_receipt_logo = $18, receipt_logo = $19, updated_at = NOW()
+         WHERE id = $20 AND tenant_id = $21
          RETURNING *`,
         [
           companyPhone,
@@ -629,7 +630,8 @@ router.put('/', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res
           finalInvoicePrefix,
           invoiceFooter,
           lowStockLimit,
-          pricingMode,
+          finalPricingMode,
+          finalBusinessType,
           showReceiptLogo,
           receiptLogo,
           currentRow.id,
@@ -641,8 +643,8 @@ router.put('/', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res
         `INSERT INTO company_settings (
            tenant_id, phone, email, address, strn, tax_id, website, logo,
            currency_name, currency, currency_symbol, barcode_prefix, purchase_prefix, invoice_prefix,
-           invoice_footer, low_stock_limit, pricing_mode, pricing_policy_locked, show_receipt_logo, receipt_logo, is_installed
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, true, $18, $19, true)
+           invoice_footer, low_stock_limit, pricing_mode, business_type, pricing_policy_locked, show_receipt_logo, receipt_logo, is_installed
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, true, $19, $20, true)
          RETURNING *`,
         [
           tenantId,
@@ -661,14 +663,15 @@ router.put('/', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res
           finalInvoicePrefix,
           invoiceFooter,
           lowStockLimit,
-          pricingMode,
+          finalPricingMode,
+          finalBusinessType,
           showReceiptLogo,
           receiptLogo,
         ]
       );
     }
 
-    // Store name lives exclusively in tenants.name; also lock Initial Store Setup & POS Defaults
+    // Store name lives in tenants.name; do NOT modify business_type, pricing_policy, invoice_prefix, purchase_prefix
     await pgClient
       .query(
         `UPDATE tenants SET
@@ -690,7 +693,19 @@ router.put('/', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to update settings: ' + err.message });
   }
-});
+};
+
+router.put('/', requireAuth, requireAdmin, handleUpdateSettings);
+router.patch('/', requireAuth, requireAdmin, handleUpdateSettings);
+router.post('/change', requireAuth, requireAdmin, handleUpdateSettings);
+router.patch('/change', requireAuth, requireAdmin, handleUpdateSettings);
+router.put('/change', requireAuth, requireAdmin, handleUpdateSettings);
+router.post('/changeSetting', requireAuth, requireAdmin, handleUpdateSettings);
+router.put('/changeSetting', requireAuth, requireAdmin, handleUpdateSettings);
+router.patch('/changeSetting', requireAuth, requireAdmin, handleUpdateSettings);
+router.post('/change-setting', requireAuth, requireAdmin, handleUpdateSettings);
+router.put('/change-setting', requireAuth, requireAdmin, handleUpdateSettings);
+router.patch('/change-setting', requireAuth, requireAdmin, handleUpdateSettings);
 
 // --- USER MANAGEMENT (Admin Only, Strictly scoped to req.user.tenantId) ---
 
