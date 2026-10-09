@@ -622,11 +622,13 @@ async function ensureProductAndSettingsColumns() {
         await pgClient.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS min_price INTEGER NOT NULL DEFAULT 0");
         await pgClient.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS max_price INTEGER NOT NULL DEFAULT 0");
         await pgClient.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS pricing_policy VARCHAR(30) DEFAULT NULL");
-        await pgClient.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS pairs_per_carton INTEGER NOT NULL DEFAULT 12");
-        await pgClient.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS min_order_cartons INTEGER NOT NULL DEFAULT 1");
         await pgClient.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS wholesale_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00");
-        await pgClient.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS carton_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00");
-        await pgClient.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS carton_barcode TEXT DEFAULT ''");
+        await pgClient.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS minimum_pairs INTEGER NOT NULL DEFAULT 12");
+        await pgClient.query("ALTER TABLE products DROP COLUMN IF EXISTS pairs_per_carton");
+        await pgClient.query("ALTER TABLE products DROP COLUMN IF EXISTS min_order_cartons");
+        await pgClient.query("ALTER TABLE products DROP COLUMN IF EXISTS carton_price");
+        await pgClient.query("ALTER TABLE products DROP COLUMN IF EXISTS carton_barcode");
+        await pgClient.query("ALTER TABLE products DROP COLUMN IF EXISTS store_lot_size");
         await pgClient.query("ALTER TABLE company_settings ADD COLUMN IF NOT EXISTS business_type TEXT NOT NULL DEFAULT 'RETAIL'");
         await pgClient.query("ALTER TABLE company_settings ADD COLUMN IF NOT EXISTS default_pairs_per_carton INTEGER NOT NULL DEFAULT 12");
         await pgClient.query("ALTER TABLE company_settings ADD COLUMN IF NOT EXISTS wholesale_invoice_format TEXT NOT NULL DEFAULT 'A4'");
@@ -709,12 +711,9 @@ function mapProductRow(row: any, settings: { pricingPolicy: 'FIXED' | 'NEGOTIABL
     sellingPrice = maxPrice;
   }
 
-  const pairsPerCarton = Math.max(1, Number(row.pairs_per_carton || 12));
-  const minOrderCartons = Math.max(1, Number(row.min_order_cartons || 1));
+  const rawMinPairs = row.minimum_pairs ?? row.pairs_per_carton ?? row.store_lot_size;
+  const minimumPairs = Number(rawMinPairs) === 16 ? 16 : 12;
   const wholesalePrice = Number(row.wholesale_price || (sellingPrice > 0 ? sellingPrice : costPrice));
-  const cartonPrice = Number(row.carton_price || (wholesalePrice * pairsPerCarton));
-  const totalStockNum = Number(row.total_stock || 0);
-  const totalCartons = Math.floor(totalStockNum / pairsPerCarton);
 
   return {
     id: row.id,
@@ -729,7 +728,6 @@ function mapProductRow(row: any, settings: { pricingPolicy: 'FIXED' | 'NEGOTIABL
     sku: row.sku,
     article: row.article || '',
     barcode: row.barcode,
-    cartonBarcode: row.carton_barcode || '',
     primaryImageUrl: row.primary_image_url,
     description: row.description,
     costPrice,
@@ -737,10 +735,7 @@ function mapProductRow(row: any, settings: { pricingPolicy: 'FIXED' | 'NEGOTIABL
     minPrice,
     maxPrice,
     wholesalePrice,
-    cartonPrice,
-    pairsPerCarton,
-    minOrderCartons,
-    totalCartons,
+    minimumPairs,
     pricingPolicy: effectivePolicy,
     // Backward-compatible aliases for POS / Sticker / Catalog components
     salePrice: sellingPrice,
@@ -763,7 +758,7 @@ router.get(['/lookup/:barcode', '/barcode/:barcode', '/scan/:barcode'], requireA
     const [result, settings] = await Promise.all([
       pgClient.query(
         `SELECT p.id, p.tenant_id, p.tenant_product_no, p.name, p.brand, p.category, p.sku, p.article, p.barcode,
-                p.carton_barcode, p.pairs_per_carton, p.min_order_cartons, p.wholesale_price, p.carton_price,
+                p.wholesale_price, p.minimum_pairs,
                 p.primary_image_url, p.description, COALESCE(p.cost_price, 0) as cost_price,
                 COALESCE(p.min_price, 0) as min_price,
                 COALESCE(p.max_price, 0) as max_price,
@@ -776,8 +771,6 @@ router.get(['/lookup/:barcode', '/barcode/:barcode', '/scan/:barcode'], requireA
              OR LOWER(p.sku) = LOWER($1)
              OR LOWER(COALESCE(p.article, '')) = LOWER($1)
              OR LOWER(COALESCE(p.name, '')) = LOWER($1)
-             OR p.carton_barcode = $1
-             OR LOWER(COALESCE(p.carton_barcode, '')) = LOWER($1)
            )
            AND p.active = true
          LIMIT 1`,
@@ -915,29 +908,25 @@ router.post('/', requireAuth, requireAdmin, async (req: AuthenticatedRequest, re
       totalStock = 0,
       initialStock,
       lowStockLimit,
-      pairsPerCarton,
-      pairs_per_carton,
-      minOrderCartons,
-      min_order_cartons,
+      minimumPairs,
+      minimum_pairs,
       wholesalePrice,
       wholesale_price,
-      cartonPrice,
-      carton_price,
-      cartonBarcode,
-      carton_barcode,
     } = req.body;
 
-    const finalPairsPerCarton = Math.max(1, parseInt(String(pairsPerCarton ?? pairs_per_carton ?? 12), 10) || 12);
-    const finalMinOrderCartons = Math.max(1, parseInt(String(minOrderCartons ?? min_order_cartons ?? 1), 10) || 1);
+    const rawMinPairs = minimumPairs ?? minimum_pairs ?? req.body.storeLotSize ?? req.body.store_lot_size ?? req.body.pairsPerCarton ?? req.body.pairs_per_carton;
+    if (rawMinPairs !== undefined && rawMinPairs !== null && rawMinPairs !== '') {
+      const num = Number(rawMinPairs);
+      if (num !== 12 && num !== 16) {
+        return res.status(400).json({ error: 'Minimum pairs for wholesale lot size must be either 12 or 16 pairs.' });
+      }
+    }
+    const finalMinimumPairs = Number(rawMinPairs) === 16 ? 16 : 12;
+
     const rawWholesalePrice = wholesalePrice ?? wholesale_price;
     const finalWholesalePrice = rawWholesalePrice !== undefined && rawWholesalePrice !== null && rawWholesalePrice !== ''
       ? Math.max(0, parseFloat(String(rawWholesalePrice)) || 0)
       : (sellingPrice ? Math.max(0, parseFloat(String(sellingPrice)) || 0) : 0);
-    const rawCartonPrice = cartonPrice ?? carton_price;
-    const finalCartonPrice = rawCartonPrice !== undefined && rawCartonPrice !== null && rawCartonPrice !== ''
-      ? Math.max(0, parseFloat(String(rawCartonPrice)) || 0)
-      : (finalWholesalePrice * finalPairsPerCarton);
-    const finalCartonBarcode = String(cartonBarcode ?? carton_barcode ?? '').trim();
 
     if (brand !== undefined) {
       if (typeof brand !== 'string') {
@@ -1092,10 +1081,10 @@ router.post('/', requireAuth, requireAdmin, async (req: AuthenticatedRequest, re
     try {
       const productRes = await pgClient.query<{ id: number }>(
         `INSERT INTO products (
-          tenant_id, tenant_product_no, name, brand, category, sku, article, barcode, carton_barcode, primary_image_url,
-          description, cost_price, min_price, max_price, wholesale_price, carton_price, pairs_per_carton, min_order_cartons,
+          tenant_id, tenant_product_no, name, brand, category, sku, article, barcode, primary_image_url,
+          description, cost_price, min_price, max_price, wholesale_price, minimum_pairs,
           total_stock, low_stock_limit, active, pricing_policy
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, true, $21)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, true, $18)
         RETURNING id`,
         [
           tenantId,
@@ -1106,16 +1095,13 @@ router.post('/', requireAuth, requireAdmin, async (req: AuthenticatedRequest, re
           finalSku,
           cleanArticle,
           finalBarcode,
-          finalCartonBarcode,
           primaryImageUrl || '',
           description || '',
           finalCostPrice,
           finalMinPrice,
           finalMaxPrice,
           finalWholesalePrice,
-          finalCartonPrice,
-          finalPairsPerCarton,
-          finalMinOrderCartons,
+          finalMinimumPairs,
           physicalStock,
           finalLowStockLimit,
           chosenPolicy,
@@ -1317,29 +1303,31 @@ router.put('/:id', requireAuth, requireAdmin, async (req: AuthenticatedRequest, 
       maxPrice: finalMaxPrice,
     } = validation.data;
 
-    const finalPairsPerCarton = Math.max(1, parseInt(String(req.body.pairsPerCarton ?? req.body.pairs_per_carton ?? current.pairs_per_carton ?? 12), 10) || 12);
-    const finalMinOrderCartons = Math.max(1, parseInt(String(req.body.minOrderCartons ?? req.body.min_order_cartons ?? current.min_order_cartons ?? 1), 10) || 1);
+    const rawMinPairs = req.body.minimumPairs ?? req.body.minimum_pairs ?? req.body.storeLotSize ?? req.body.store_lot_size ?? req.body.pairsPerCarton ?? req.body.pairs_per_carton;
+    if (rawMinPairs !== undefined && rawMinPairs !== null && rawMinPairs !== '') {
+      const num = Number(rawMinPairs);
+      if (num !== 12 && num !== 16) {
+        return res.status(400).json({ error: 'Minimum pairs for wholesale lot size must be either 12 or 16 pairs.' });
+      }
+    }
+    const finalMinimumPairs = rawMinPairs !== undefined && rawMinPairs !== null && rawMinPairs !== ''
+      ? (Number(rawMinPairs) === 16 ? 16 : 12)
+      : (Number(current.minimum_pairs) === 16 ? 16 : 12);
+
     const rawWholesalePrice = req.body.wholesalePrice ?? req.body.wholesale_price ?? current.wholesale_price;
     const finalWholesalePrice = rawWholesalePrice !== undefined && rawWholesalePrice !== null && rawWholesalePrice !== ''
       ? Math.max(0, parseFloat(String(rawWholesalePrice)) || 0)
       : finalMaxPrice;
-    const rawCartonPrice = req.body.cartonPrice ?? req.body.carton_price ?? current.carton_price;
-    const finalCartonPrice = rawCartonPrice !== undefined && rawCartonPrice !== null && rawCartonPrice !== ''
-      ? Math.max(0, parseFloat(String(rawCartonPrice)) || 0)
-      : (finalWholesalePrice * finalPairsPerCarton);
-    const finalCartonBarcode = req.body.cartonBarcode !== undefined || req.body.carton_barcode !== undefined
-      ? String(req.body.cartonBarcode ?? req.body.carton_barcode ?? '').trim()
-      : (current.carton_barcode || '');
 
     await pgClient.query(
       `UPDATE products SET
         name = $1, brand = $2, category = $3, sku = $4, article = $5, barcode = $6,
-        carton_barcode = $7, pairs_per_carton = $8, min_order_cartons = $9, wholesale_price = $10, carton_price = $11,
-        primary_image_url = $12, description = $13, cost_price = $14, total_stock = $15,
-        low_stock_limit = $16, active = $17,
-        min_price = $18, max_price = $19, pricing_policy = $20,
+        wholesale_price = $7, minimum_pairs = $8,
+        primary_image_url = $9, description = $10, cost_price = $11, total_stock = $12,
+        low_stock_limit = $13, active = $14,
+        min_price = $15, max_price = $16, pricing_policy = $17,
         updated_at = NOW()
-      WHERE id = $21 AND COALESCE(tenant_id, 1) = $22`,
+      WHERE id = $18 AND COALESCE(tenant_id, 1) = $19`,
       [
         finalName,
         finalBrand,
@@ -1347,11 +1335,8 @@ router.put('/:id', requireAuth, requireAdmin, async (req: AuthenticatedRequest, 
         finalSkuToUpdate,
         finalArticle,
         finalBarcode,
-        finalCartonBarcode,
-        finalPairsPerCarton,
-        finalMinOrderCartons,
         finalWholesalePrice,
-        finalCartonPrice,
+        finalMinimumPairs,
         primaryImageUrl !== undefined ? primaryImageUrl : current.primary_image_url,
         description !== undefined ? description : current.description,
         finalCostPrice,

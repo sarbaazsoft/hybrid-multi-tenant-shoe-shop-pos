@@ -438,7 +438,7 @@ router.post('/checkout', requireAuth, async (req: AuthenticatedRequest, res: Res
       : null;
 
     const saleType = String(req.body.saleType || req.body.sale_type || 'RETAIL').toUpperCase() === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL';
-    const totalCartons = Math.max(0, parseInt(String(req.body.totalCartons || req.body.total_cartons || 0), 10) || 0);
+    const totalCartons = Math.max(0, parseFloat(String(req.body.totalCartons || req.body.total_cartons || 0)) || 0);
     const transportName = String(req.body.transportName || req.body.transport_name || '').trim();
     const biltyNumber = String(req.body.biltyNumber || req.body.bilty_number || '').trim();
     const bookingDestination = String(req.body.bookingDestination || req.body.booking_destination || '').trim();
@@ -487,7 +487,7 @@ router.post('/checkout', requireAuth, async (req: AuthenticatedRequest, res: Res
       const v = validatedItems[idx];
       const origItem = items[idx] || {};
       const packingType = String(origItem.packingType || origItem.packing_type || 'PAIR').toUpperCase() === 'CARTON' ? 'CARTON' : 'PAIR';
-      const cartonQuantity = Math.max(0, parseInt(String(origItem.cartonQuantity || origItem.carton_quantity || 0), 10) || 0);
+      const cartonQuantity = Math.max(0, parseFloat(String(origItem.cartonQuantity || origItem.carton_quantity || 0)) || 0);
       const pairsPerCarton = Math.max(1, parseInt(String(origItem.pairsPerCarton || origItem.pairs_per_carton || 1), 10) || 1);
 
       await pgClient.query(

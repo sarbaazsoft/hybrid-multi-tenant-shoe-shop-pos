@@ -108,19 +108,16 @@ export class TenantScopedDb {
       maxPrice: number;
       totalStock: number;
       lowStockLimit?: number;
-      pairsPerCarton?: number;
-      minOrderCartons?: number;
       wholesalePrice?: number;
-      cartonPrice?: number;
-      cartonBarcode?: string;
+      minimumPairs?: number;
     }) => {
       const res = await pgClient.query(
         `INSERT INTO products (
           tenant_id, name, brand, category, sku, barcode, article,
           primary_image_url, description, cost_price,
           min_price, max_price, total_stock, low_stock_limit, active,
-          pairs_per_carton, min_order_cartons, wholesale_price, carton_price, carton_barcode
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, true, $15, $16, $17, $18, $19)
+          wholesale_price, minimum_pairs
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, true, $15, $16)
         RETURNING *`,
         [
           this.tenantId,
@@ -137,11 +134,8 @@ export class TenantScopedDb {
           data.maxPrice,
           data.totalStock,
           data.lowStockLimit ?? 5,
-          data.pairsPerCarton ?? 12,
-          data.minOrderCartons ?? 1,
           data.wholesalePrice ?? data.maxPrice,
-          data.cartonPrice ?? ((data.wholesalePrice ?? data.maxPrice) * (data.pairsPerCarton ?? 12)),
-          data.cartonBarcode || '',
+          (Number(data.minimumPairs) === 16 ? 16 : 12),
         ]
       );
       return res.rows[0];
@@ -161,11 +155,8 @@ export class TenantScopedDb {
       maxPrice: number;
       totalStock: number;
       lowStockLimit: number;
-      pairsPerCarton: number;
-      minOrderCartons: number;
       wholesalePrice: number;
-      cartonPrice: number;
-      cartonBarcode: string;
+      minimumPairs: number;
     }>) => {
       const existing = await this.products.findById(id);
       if (!existing) return null;
@@ -176,10 +167,9 @@ export class TenantScopedDb {
           article = $6, primary_image_url = $7, description = $8,
           cost_price = $9, min_price = $10, max_price = $11,
           total_stock = $12, low_stock_limit = $13,
-          pairs_per_carton = $14, min_order_cartons = $15,
-          wholesale_price = $16, carton_price = $17, carton_barcode = $18,
+          wholesale_price = $14, minimum_pairs = $15,
           updated_at = NOW()
-         WHERE id = $19 AND tenant_id = $20
+         WHERE id = $16 AND tenant_id = $17
          RETURNING *`,
         [
           data.name ?? existing.name,
@@ -195,11 +185,8 @@ export class TenantScopedDb {
           data.maxPrice ?? existing.max_price,
           data.totalStock ?? existing.total_stock,
           data.lowStockLimit ?? existing.low_stock_limit,
-          data.pairsPerCarton ?? existing.pairs_per_carton ?? 12,
-          data.minOrderCartons ?? existing.min_order_cartons ?? 1,
           data.wholesalePrice ?? existing.wholesale_price ?? existing.max_price,
-          data.cartonPrice ?? existing.carton_price ?? (existing.max_price * 12),
-          data.cartonBarcode ?? existing.carton_barcode ?? '',
+          data.minimumPairs !== undefined ? (Number(data.minimumPairs) === 16 ? 16 : 12) : (existing.minimum_pairs || 12),
           id,
           this.tenantId,
         ]

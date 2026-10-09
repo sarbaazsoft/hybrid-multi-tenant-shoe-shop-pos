@@ -651,15 +651,14 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({
                         {isWholesaleStore ? (
                           <div className="flex flex-col items-end space-y-0.5">
                             <div className="font-mono font-black text-indigo-600 dark:text-indigo-400 text-xs">
-                              {currencySymbol} {formatStockPrice(p.wholesalePrice ?? p.wholesale_price ?? p.sellingPrice ?? p.selling_price)}
+                              {currencySymbol} {formatStockPrice(p.wholesalePrice ?? p.sellingPrice)}
                               <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal ml-0.5">/pair</span>
                             </div>
-                            <div className="font-mono font-bold text-purple-600 dark:text-purple-400 text-[11px]">
-                              {currencySymbol} {formatStockPrice(p.cartonPrice ?? p.carton_price ?? ((p.wholesalePrice ?? p.sellingPrice ?? 0) * (p.pairsPerCarton || 12)))}
-                              <span className="text-[9px] text-slate-400 font-normal ml-0.5">/ctn ({p.pairsPerCarton || 12} pr)</span>
+                            <div className="font-mono font-bold text-purple-600 dark:text-purple-400 text-[10px]">
+                              {p.minimumPairs || 12} Pairs Lot
                             </div>
                             <div className="font-mono text-slate-500 dark:text-slate-400 text-[10px]">
-                              {currencySymbol} {formatStockPrice(p.costPrice ?? p.cost_price)} cost
+                              {currencySymbol} {formatStockPrice(p.costPrice)} cost
                             </div>
                           </div>
                         ) : (
@@ -714,13 +713,10 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({
                                   : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60'
                               }`}
                             >
-                              {Math.floor(p.totalStock / (p.pairsPerCarton || 12))} Cartons
+                              {p.totalStock} Pairs
                             </span>
                             <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
-                              ({p.totalStock} pairs)
-                            </span>
-                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 mt-0.5">
-                              Min {p.minOrderCartons || 1} Ctn
+                              ({Math.floor(p.totalStock / (p.minimumPairs || 12))} Lots)
                             </span>
                           </div>
                         ) : (

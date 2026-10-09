@@ -245,3 +245,32 @@ export function validateProductBrand(brand: unknown): {
     error: result.error.issues[0]?.message || 'Invalid brand text.',
   };
 }
+
+/**
+ * Zod Schema for Wholesale Minimum Pairs (Wholesale Lot Size: 12 or 16 pairs).
+ */
+export const wholesaleMinimumPairsSchema = z
+  .union([z.literal(12), z.literal(16)], {
+    message: 'Wholesale lot size must be either 12 or 16 pairs.',
+  })
+  .default(12);
+
+export function validateMinimumPairs(value: unknown): {
+  success: boolean;
+  minimumPairs: 12 | 16;
+  error?: string;
+} {
+  const num = Number(value);
+  if (num === 12 || num === 16) {
+    return { success: true, minimumPairs: num };
+  }
+  if (value === undefined || value === null || value === '') {
+    return { success: true, minimumPairs: 12 };
+  }
+  return {
+    success: false,
+    minimumPairs: 12,
+    error: 'Wholesale lot size must be either 12 or 16 pairs.',
+  };
+}
+

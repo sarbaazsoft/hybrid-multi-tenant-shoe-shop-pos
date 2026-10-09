@@ -196,7 +196,6 @@ const DATABASE_TABLE_DDL: string[] = [
     category VARCHAR(100) NOT NULL DEFAULT 'Men',
     sku TEXT NOT NULL,
     barcode TEXT NOT NULL,
-    carton_barcode TEXT DEFAULT '',
     article TEXT DEFAULT '',
     primary_image_url TEXT DEFAULT '',
     description TEXT DEFAULT '',
@@ -204,9 +203,7 @@ const DATABASE_TABLE_DDL: string[] = [
     min_price INTEGER NOT NULL DEFAULT 0,
     max_price INTEGER NOT NULL DEFAULT 0,
     wholesale_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-    carton_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-    pairs_per_carton INTEGER NOT NULL DEFAULT 12,
-    min_order_cartons INTEGER NOT NULL DEFAULT 1,
+    minimum_pairs INTEGER NOT NULL DEFAULT 12,
     total_stock INTEGER NOT NULL DEFAULT 0,
     low_stock_limit INTEGER NOT NULL DEFAULT 5,
     active BOOLEAN NOT NULL DEFAULT true,
@@ -312,7 +309,7 @@ const DATABASE_TABLE_DDL: string[] = [
     subtotal NUMERIC(12, 2) NOT NULL,
     discount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
     total_amount NUMERIC(12, 2) NOT NULL,
-    total_cartons INTEGER NOT NULL DEFAULT 0,
+    total_cartons NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
     transport_name TEXT DEFAULT '',
     bilty_number TEXT DEFAULT '',
     booking_destination TEXT DEFAULT '',
@@ -335,7 +332,7 @@ const DATABASE_TABLE_DDL: string[] = [
     product_id INTEGER NOT NULL REFERENCES products(id),
     product_name TEXT NOT NULL,
     packing_type TEXT NOT NULL DEFAULT 'PAIR',
-    carton_quantity INTEGER NOT NULL DEFAULT 0,
+    carton_quantity NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
     pairs_per_carton INTEGER NOT NULL DEFAULT 1,
     quantity INTEGER NOT NULL,
     unit_price NUMERIC(12, 2) NOT NULL,
@@ -580,23 +577,22 @@ export async function ensureDatabaseSchema(): Promise<void> {
           EXCEPTION WHEN OTHERS THEN NULL;
           END;
           BEGIN
-            ALTER TABLE products ADD COLUMN IF NOT EXISTS pairs_per_carton INTEGER NOT NULL DEFAULT 12;
-          EXCEPTION WHEN OTHERS THEN NULL;
-          END;
-          BEGIN
-            ALTER TABLE products ADD COLUMN IF NOT EXISTS min_order_cartons INTEGER NOT NULL DEFAULT 1;
-          EXCEPTION WHEN OTHERS THEN NULL;
-          END;
-          BEGIN
             ALTER TABLE products ADD COLUMN IF NOT EXISTS wholesale_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00;
           EXCEPTION WHEN OTHERS THEN NULL;
           END;
           BEGIN
-            ALTER TABLE products ADD COLUMN IF NOT EXISTS carton_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00;
-          EXCEPTION WHEN OTHERS THEN NULL;
-          END;
-          BEGIN
-            ALTER TABLE products ADD COLUMN IF NOT EXISTS carton_barcode TEXT DEFAULT '';
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS minimum_pairs INTEGER NOT NULL DEFAULT 12;
+            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='products' AND column_name='pairs_per_carton') THEN
+              UPDATE products SET minimum_pairs = CASE WHEN pairs_per_carton = 16 THEN 16 ELSE 12 END WHERE minimum_pairs IS NULL OR minimum_pairs = 0;
+              ALTER TABLE products DROP COLUMN IF EXISTS pairs_per_carton;
+            END IF;
+            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='products' AND column_name='store_lot_size') THEN
+              UPDATE products SET minimum_pairs = CASE WHEN store_lot_size = 16 THEN 16 ELSE 12 END WHERE minimum_pairs IS NULL OR minimum_pairs = 0;
+              ALTER TABLE products DROP COLUMN IF EXISTS store_lot_size;
+            END IF;
+            ALTER TABLE products DROP COLUMN IF EXISTS carton_barcode;
+            ALTER TABLE products DROP COLUMN IF EXISTS carton_price;
+            ALTER TABLE products DROP COLUMN IF EXISTS min_order_cartons;
           EXCEPTION WHEN OTHERS THEN NULL;
           END;
           BEGIN
@@ -628,7 +624,11 @@ export async function ensureDatabaseSchema(): Promise<void> {
           EXCEPTION WHEN OTHERS THEN NULL;
           END;
           BEGIN
-            ALTER TABLE sales ADD COLUMN IF NOT EXISTS total_cartons INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE sales ADD COLUMN IF NOT EXISTS total_cartons NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
+          EXCEPTION WHEN OTHERS THEN NULL;
+          END;
+          BEGIN
+            ALTER TABLE sales ALTER COLUMN total_cartons TYPE NUMERIC(10, 2) USING total_cartons::numeric;
           EXCEPTION WHEN OTHERS THEN NULL;
           END;
           BEGIN
@@ -660,7 +660,11 @@ export async function ensureDatabaseSchema(): Promise<void> {
           EXCEPTION WHEN OTHERS THEN NULL;
           END;
           BEGIN
-            ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS carton_quantity INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS carton_quantity NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
+          EXCEPTION WHEN OTHERS THEN NULL;
+          END;
+          BEGIN
+            ALTER TABLE sale_items ALTER COLUMN carton_quantity TYPE NUMERIC(10, 2) USING carton_quantity::numeric;
           EXCEPTION WHEN OTHERS THEN NULL;
           END;
           BEGIN

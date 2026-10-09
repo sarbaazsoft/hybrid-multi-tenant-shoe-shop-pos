@@ -122,12 +122,36 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const [isSideEndLabelOpen, setIsSideEndLabelOpen] = useState(false);
   const [isBarcodeStickerOpen, setIsBarcodeStickerOpen] = useState(false);
 
+  // Business Type & Wholesale Configuration
+  const isWholesaleStore =
+    String(effectiveSettings?.businessType || effectiveSettings?.business_type || '').toUpperCase() === 'WHOLESALE';
+
+  const [minimumPairs, setMinimumPairs] = useState<number>(() => {
+    const raw =
+      product?.minimumPairs ??
+      product?.minimum_pairs ??
+      product?.storeLotSize ??
+      product?.store_lot_size ??
+      product?.pairsPerCarton ??
+      product?.pairs_per_carton;
+    return Number(raw) === 16 ? 16 : 12;
+  });
+
   // Inventory & Product info
   const [productName, setProductName] = useState<string>(product?.name || '');
   const [lotSize, setLotSize] = useState<6 | 8>(6);
-  const [totalStock, setTotalStock] = useState<number | ''>(
-    product?.totalStock !== undefined ? product.totalStock : 0
-  );
+  const [totalStock, setTotalStock] = useState<number | ''>(() => {
+    if (product?.totalStock !== undefined) return product.totalStock;
+    if (isWholesaleStore) {
+      const raw =
+        product?.minimumPairs ??
+        product?.minimum_pairs ??
+        product?.storeLotSize ??
+        product?.store_lot_size;
+      return (Number(raw) === 16 ? 16 : 12) / 2; // Default 0.5 carton (6 or 8 pairs)
+    }
+    return 0;
+  });
   const [primaryImageUrl, setPrimaryImageUrl] = useState<string>(product?.primaryImageUrl || '');
   const description = product?.description || '';
 
@@ -136,31 +160,13 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     setTotalStock(newSize);
   };
 
-  // Business Type & Wholesale Configuration
-  const isWholesaleStore =
-    String(effectiveSettings?.businessType || effectiveSettings?.business_type || '').toUpperCase() === 'WHOLESALE';
-
-  const defaultCartonPairs = Number(
-    effectiveSettings?.defaultPairsPerCarton || effectiveSettings?.default_pairs_per_carton || 12
-  );
-
-  const [pairsPerCarton, setPairsPerCarton] = useState<number>(() => {
-    if (product?.pairsPerCarton || product?.pairs_per_carton) {
-      return Math.max(1, Number(product?.pairsPerCarton || product?.pairs_per_carton));
+  const handleMinimumPairsChange = (newPairs: number) => {
+    const safePairs = newPairs === 16 ? 16 : 12;
+    setMinimumPairs(safePairs);
+    if (!product || totalStock === 6 || totalStock === 8 || totalStock === 12 || totalStock === 16) {
+      setTotalStock(safePairs / 2); // 0.5 carton default (6 pairs if 12, 8 pairs if 16)
     }
-    return defaultCartonPairs > 0 ? defaultCartonPairs : 12;
-  });
-
-  const [minOrderCartons, setMinOrderCartons] = useState<number>(() => {
-    if (product?.minOrderCartons || product?.min_order_cartons) {
-      return Math.max(1, Number(product?.minOrderCartons || product?.min_order_cartons));
-    }
-    return 1;
-  });
-
-  const [cartonBarcode, setCartonBarcode] = useState<string>(
-    product?.cartonBarcode || product?.carton_barcode || ''
-  );
+  };
 
   // Step 2: Pricing Specifications State (Integer values only, no decimals)
   // Uses global locked pricing policy configured in Installation Wizard / Settings
@@ -219,26 +225,11 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     return parseInitialPrice(raw);
   });
 
-  // Wholesale Carton Price (auto-calculated: wholesalePrice * pairsPerCarton, or explicit)
-  const [cartonPrice, setCartonPrice] = useState<number | ''>(() => {
-    const rawCp = product?.cartonPrice ?? product?.carton_price;
-    if (rawCp !== undefined && rawCp !== null && rawCp !== '') {
-      return parseInitialPrice(rawCp);
-    }
-    const wp = parseInitialPrice(
-      product?.wholesalePrice ?? product?.wholesale_price ?? product?.sellingPrice ?? product?.selling_price
-    );
-    const ppc = product?.pairsPerCarton || product?.pairs_per_carton || defaultCartonPairs || 12;
-    return typeof wp === 'number' ? Math.round(wp * ppc) : '';
-  });
-
-  // Two-way synchronization between Wholesale Rate per Pair and Carton Price
   const handleWholesalePriceChange = (valStr: string) => {
     setErrorMessage(null);
     const cleaned = cleanStockPriceInput(valStr);
     if (cleaned === '') {
       setWholesalePrice('');
-      setCartonPrice('');
       setMaxPrice('');
       setMinPrice('');
       return;
@@ -248,36 +239,6 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       setWholesalePrice(num);
       setMaxPrice(num);
       setMinPrice(num);
-      setCartonPrice(Math.round(num * (pairsPerCarton || 12)));
-    }
-  };
-
-  const handleCartonPriceChange = (valStr: string) => {
-    setErrorMessage(null);
-    const cleaned = cleanStockPriceInput(valStr);
-    if (cleaned === '') {
-      setCartonPrice('');
-      setWholesalePrice('');
-      setMaxPrice('');
-      setMinPrice('');
-      return;
-    }
-    const num = parseInt(cleaned, 10);
-    if (!isNaN(num)) {
-      setCartonPrice(num);
-      const ppc = pairsPerCarton > 0 ? pairsPerCarton : 12;
-      const perPair = Math.round(num / ppc);
-      setWholesalePrice(perPair);
-      setMaxPrice(perPair);
-      setMinPrice(perPair);
-    }
-  };
-
-  const handlePairsPerCartonSelect = (newPairs: number) => {
-    const safePairs = Math.max(1, newPairs);
-    setPairsPerCarton(safePairs);
-    if (typeof wholesalePrice === 'number') {
-      setCartonPrice(Math.round(wholesalePrice * safePairs));
     }
   };
 
@@ -681,12 +642,8 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       return false;
     }
     if (isWholesaleStore) {
-      if (!pairsPerCarton || pairsPerCarton < 1) {
-        setErrorMessage('Pairs per Carton must be at least 1.');
-        return false;
-      }
-      if (!minOrderCartons || minOrderCartons < 1) {
-        setErrorMessage('Minimum Order Cartons must be at least 1.');
+      if (minimumPairs !== 12 && minimumPairs !== 16) {
+        setErrorMessage('Minimum pairs for wholesale lot size must be 12 or 16 pairs.');
         return false;
       }
     }
@@ -842,12 +799,10 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     let finalMinToSave = 0;
     let finalMaxToSave = 0;
     let finalWholesaleRate = 0;
-    let finalCartonRate = 0;
 
     if (isWholesaleStore) {
       finalCostToSave = Number(costPrice);
       finalWholesaleRate = typeof wholesalePrice === 'number' ? wholesalePrice : finalCostToSave;
-      finalCartonRate = typeof cartonPrice === 'number' ? cartonPrice : (finalWholesaleRate * (pairsPerCarton || 12));
       finalMaxToSave = finalWholesaleRate;
       finalMinToSave = pricingPolicy === 'NEGOTIABLE' && typeof minPrice === 'number' ? minPrice : finalWholesaleRate;
     } else {
@@ -868,7 +823,6 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       finalMinToSave = validation.data.minPrice;
       finalMaxToSave = validation.data.maxPrice;
       finalWholesaleRate = finalMaxToSave;
-      finalCartonRate = finalMaxToSave * (pairsPerCarton || 12);
     }
 
     setIsSubmitting(true);
@@ -945,7 +899,6 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         article: cleanArticle,
         sku: cleanSku,
         barcode: finalBarcodeToSave,
-        cartonBarcode: isWholesaleStore && cartonBarcode.trim() ? cartonBarcode.trim() : undefined,
         primaryImageUrl: primaryImageUrl.trim(),
         description: description.trim(),
         costPrice: finalCostToSave,
@@ -953,9 +906,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         maxPrice: finalMaxToSave,
         sellingPrice: finalMaxToSave,
         wholesalePrice: isWholesaleStore ? finalWholesaleRate : undefined,
-        cartonPrice: isWholesaleStore ? finalCartonRate : undefined,
-        pairsPerCarton: isWholesaleStore ? (pairsPerCarton || 12) : 12,
-        minOrderCartons: isWholesaleStore ? (minOrderCartons || 1) : 1,
+        minimumPairs: isWholesaleStore ? (minimumPairs === 16 ? 16 : 12) : 12,
         totalStock: totalStock === '' ? 0 : Math.round(Number(totalStock)),
         lowStockLimit: product?.lowStockLimit !== undefined ? product.lowStockLimit : 5,
       };
@@ -1256,73 +1207,128 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 <div className="flex items-center justify-between pb-2 border-b border-gray-100 dark:border-slate-800">
                   <h5 className="font-bold text-gray-800 dark:text-white text-xs uppercase tracking-wider flex items-center gap-2">
                     <Package className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" />
-                    <span>{isWholesaleStore ? 'Wholesale Master Carton & Inventory Packaging' : 'Physical Inventory & Basic Specs'}</span>
+                    <span>{isWholesaleStore ? 'Wholesale Inventory & Lot Configuration' : 'Physical Inventory & Basic Specs'}</span>
                   </h5>
                   {isWholesaleStore && (
                     <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 uppercase">
-                      B2B Carton Model
+                      B2B Wholesale Lot
                     </span>
                   )}
                 </div>
 
                 {isWholesaleStore ? (
                   /* ========================================================= */
-                  /* WHOLESALE STORE: CARTON PACKAGING & STOCK CONTROLS        */
+                  /* WHOLESALE STORE: WHOLESALE STOCK & LOT SIZE COUNTER       */
                   /* ========================================================= */
-                  <div className="space-y-4">
-                    {/* 1. Pairs Per Carton & Minimum Order Cartons */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Pairs per Carton */}
-                      <div className="p-3.5 bg-indigo-50/70 dark:bg-[#070B14] border border-indigo-200/80 dark:border-indigo-900/60 rounded-xl space-y-2 shadow-2xs">
-                        <div className="flex items-center justify-between">
-                          <label className="block font-bold text-indigo-950 dark:text-white text-xs">
-                            Pairs Per Carton (Master Box) <span className="text-red-500">*</span>
-                          </label>
-                          <span className="text-[10px] font-mono text-indigo-600 dark:text-indigo-400 font-bold">pairs_per_carton</span>
-                        </div>
-                        <p className="text-[11px] text-indigo-900/70 dark:text-slate-400">
-                          Number of shoe pairs packed inside each wholesale carton box.
-                        </p>
-                        <div className="flex items-center space-x-1">
+                  <div className="p-3.5 bg-indigo-50/70 dark:bg-gradient-to-br dark:from-slate-900 dark:via-indigo-950 dark:to-purple-950 border border-indigo-200/80 dark:border-indigo-600/40 rounded-xl space-y-3 shadow-sm">
+                    <label className="block font-bold text-indigo-950 dark:text-white text-xs">
+                      Total Available Stock Quantity (Pairs) <span className="text-red-500 dark:text-pink-400">*</span>
+                    </label>
+                    <div className="flex items-center space-x-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setTotalStock((prev) => Math.max(0, (typeof prev === 'number' ? prev : 0) - (minimumPairs / 2)))}
+                        className="w-8 h-8 rounded-lg border border-indigo-200 dark:border-indigo-400/40 bg-white dark:bg-white/10 hover:bg-indigo-100 dark:hover:bg-white/20 flex items-center justify-center font-bold text-indigo-950 dark:text-white text-sm transition active:scale-95 shadow-2xs cursor-pointer"
+                        title={`Decrease 0.5 Carton (${minimumPairs / 2} pairs)`}
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        min="0"
+                        required
+                        value={totalStock}
+                        onChange={(e) => setTotalStock(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                        placeholder="0"
+                        className="flex-1 py-1.5 px-3 bg-white dark:bg-slate-950/80 border border-indigo-200 dark:border-indigo-400/40 rounded-lg font-mono font-bold text-center text-sm text-indigo-950 dark:text-white placeholder-indigo-300 dark:placeholder-white/40 outline-none focus:border-indigo-500 dark:focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-400/30 shadow-2xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setTotalStock((prev) => (typeof prev === 'number' ? prev : 0) + (minimumPairs / 2))}
+                        className="w-8 h-8 rounded-lg border border-indigo-200 dark:border-indigo-400/40 bg-white dark:bg-white/10 hover:bg-indigo-100 dark:hover:bg-white/20 flex items-center justify-center font-bold text-indigo-950 dark:text-white text-sm transition active:scale-95 shadow-2xs cursor-pointer"
+                        title={`Increase 0.5 Carton (+${minimumPairs / 2} pairs)`}
+                      >
+                        +
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTotalStock((prev) => (typeof prev === 'number' ? prev : 0) + minimumPairs)}
+                        className="h-8 px-2.5 rounded-lg border border-indigo-200 dark:border-indigo-400/40 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900 flex items-center justify-center font-bold text-indigo-700 dark:text-indigo-300 text-xs transition active:scale-95 shadow-2xs cursor-pointer"
+                        title={`Increase 1 Full Carton (+${minimumPairs} pairs)`}
+                      >
+                        +1 Ctn
+                      </button>
+                    </div>
+
+                    {/* Carton Pack / Minimum Pairs to Sell for Wholesale (12 or 16 pairs per carton) */}
+                    <div className="pt-2 border-t border-indigo-200/60 dark:border-white/10 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="block font-bold text-indigo-950 dark:text-white text-xs">
+                          Carton Pack Size <span className="text-red-500">*</span>
+                        </label>
+                        <div
+                          className="inline-flex p-0.5 bg-white/90 dark:bg-slate-950/70 border border-indigo-200 dark:border-indigo-400/30 rounded-lg"
+                          role="radiogroup"
+                          aria-label="Carton Pack Size Selector"
+                        >
                           <button
                             type="button"
-                            onClick={() => handlePairsPerCartonSelect(Math.max(1, pairsPerCarton - 1))}
-                            className="w-8 h-8 rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-white dark:bg-white/10 hover:bg-indigo-100 dark:hover:bg-white/20 flex items-center justify-center font-bold text-indigo-950 dark:text-white text-sm transition active:scale-95 cursor-pointer shadow-2xs"
+                            role="radio"
+                            aria-checked={minimumPairs === 12}
+                            onClick={() => handleMinimumPairsChange(12)}
+                            className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                              minimumPairs === 12
+                                ? 'bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 text-white shadow-md shadow-indigo-500/30 font-extrabold border border-white/20'
+                                : 'text-slate-600 dark:text-white/80 hover:text-indigo-600 dark:hover:text-white border border-transparent'
+                            }`}
                           >
-                            -
+                            12 Pairs (1 Ctn)
                           </button>
-                          <input
-                            type="number"
-                            min="1"
-                            required
-                            value={pairsPerCarton}
-                            onChange={(e) => handlePairsPerCartonSelect(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                            className="flex-1 py-1.5 px-3 bg-white dark:bg-slate-950/80 border border-indigo-200 dark:border-indigo-500/30 rounded-lg font-mono font-black text-center text-sm text-indigo-950 dark:text-white outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 shadow-2xs"
-                          />
                           <button
                             type="button"
-                            onClick={() => handlePairsPerCartonSelect(pairsPerCarton + 1)}
-                            className="w-8 h-8 rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-white dark:bg-white/10 hover:bg-indigo-100 dark:hover:bg-white/20 flex items-center justify-center font-bold text-indigo-950 dark:text-white text-sm transition active:scale-95 cursor-pointer shadow-2xs"
+                            role="radio"
+                            aria-checked={minimumPairs === 16}
+                            onClick={() => handleMinimumPairsChange(16)}
+                            className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                              minimumPairs === 16
+                                ? 'bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 text-white shadow-md shadow-indigo-500/30 font-extrabold border border-white/20'
+                                : 'text-slate-600 dark:text-white/80 hover:text-indigo-600 dark:hover:text-white border border-transparent'
+                            }`}
                           >
-                            +
+                            16 Pairs (1 Ctn)
                           </button>
                         </div>
-                        {/* Quick Presets */}
-                        <div className="flex flex-wrap items-center gap-1 pt-1">
-                          {[
-                            { val: 6, label: '6 (½ Doz)' },
-                            { val: 12, label: '12 (1 Doz)' },
-                            { val: 18, label: '18 Pairs' },
-                            { val: 24, label: '24 (2 Doz)' },
-                          ].map((chip) => (
+                      </div>
+
+                      {/* Quick Stock Chips (Exact Mappings from Requirements) */}
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-indigo-900/80 dark:text-slate-400 font-bold uppercase tracking-wider block">
+                          Quick Stock Presets:
+                        </span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {(minimumPairs === 12
+                            ? [
+                                { value: 6, label: '0.5 Carton (6 pairs)' },
+                                { value: 12, label: '1 Carton (12 pairs)' },
+                                { value: 24, label: '2 Cartons (24 pairs)' },
+                                { value: 60, label: '5 Cartons (60 pairs)' },
+                                { value: 120, label: '10 Cartons (120 pairs)' },
+                              ]
+                            : [
+                                { value: 8, label: '0.5 Carton (8 pairs)' },
+                                { value: 16, label: '1 Carton (16 pairs)' },
+                                { value: 32, label: '2 Cartons (32 pairs)' },
+                                { value: 80, label: '10 Cartons (80 pairs)' },
+                              ]
+                          ).map((chip) => (
                             <button
-                              key={chip.val}
+                              key={`ws-chip-${chip.value}`}
                               type="button"
-                              onClick={() => handlePairsPerCartonSelect(chip.val)}
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold border transition cursor-pointer ${
-                                pairsPerCarton === chip.val
-                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-indigo-200/80 dark:border-indigo-900/60 hover:bg-indigo-50'
+                              onClick={() => setTotalStock(chip.value)}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition active:scale-95 cursor-pointer ${
+                                totalStock === chip.value
+                                  ? 'bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 text-white border-transparent shadow-md shadow-indigo-500/40 ring-2 ring-indigo-400 dark:ring-white/80 font-extrabold'
+                                  : 'bg-white dark:bg-slate-900 text-indigo-950 dark:text-indigo-200 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 shadow-2xs'
                               }`}
                             >
                               {chip.label}
@@ -1330,163 +1336,6 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                           ))}
                         </div>
                       </div>
-
-                      {/* Minimum Order Limit (Cartons) */}
-                      <div className="p-3.5 bg-amber-50/70 dark:bg-[#070B14] border border-amber-200/80 dark:border-amber-900/60 rounded-xl space-y-2 shadow-2xs">
-                        <div className="flex items-center justify-between">
-                          <label className="block font-bold text-amber-950 dark:text-white text-xs">
-                            Minimum Order Limit (Cartons) <span className="text-red-500">*</span>
-                          </label>
-                          <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400 font-bold">min_order_cartons</span>
-                        </div>
-                        <p className="text-[11px] text-amber-900/70 dark:text-slate-400">
-                          Minimum cartons dealer must buy. Blocks selling broken pairs below limit.
-                        </p>
-                        <div className="flex items-center space-x-1">
-                          <button
-                            type="button"
-                            onClick={() => setMinOrderCartons((prev) => Math.max(1, prev - 1))}
-                            className="w-8 h-8 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-white dark:bg-white/10 hover:bg-amber-100 dark:hover:bg-white/20 flex items-center justify-center font-bold text-amber-950 dark:text-white text-sm transition active:scale-95 cursor-pointer shadow-2xs"
-                          >
-                            -
-                          </button>
-                          <input
-                            type="number"
-                            min="1"
-                            required
-                            value={minOrderCartons}
-                            onChange={(e) => setMinOrderCartons(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                            className="flex-1 py-1.5 px-3 bg-white dark:bg-slate-950/80 border border-amber-200 dark:border-amber-500/30 rounded-lg font-mono font-black text-center text-sm text-amber-950 dark:text-white outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 shadow-2xs"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setMinOrderCartons((prev) => prev + 1)}
-                            className="w-8 h-8 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-white dark:bg-white/10 hover:bg-amber-100 dark:hover:bg-white/20 flex items-center justify-center font-bold text-amber-950 dark:text-white text-sm transition active:scale-95 cursor-pointer shadow-2xs"
-                          >
-                            +
-                          </button>
-                        </div>
-                        {/* Live Minimum Order Badge */}
-                        <div className="pt-1">
-                          <div className="p-1.5 bg-amber-100/80 dark:bg-amber-950/60 rounded-md border border-amber-300/80 dark:border-amber-800/60 text-[10px] font-bold text-amber-900 dark:text-amber-300 flex items-center justify-between">
-                            <span>Minimum Dealer Order:</span>
-                            <span className="font-mono underline">
-                              {minOrderCartons} {minOrderCartons === 1 ? 'Carton' : 'Cartons'} (= {minOrderCartons * pairsPerCarton} Pairs)
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 2. Total Stock Inventory (Cartons & Synchronized Pairs) */}
-                    <div className="p-4 bg-emerald-50/60 dark:bg-gradient-to-br dark:from-slate-900 dark:via-emerald-950/40 dark:to-slate-900 border border-emerald-200/80 dark:border-emerald-600/40 rounded-xl space-y-3 shadow-2xs">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <label className="block font-bold text-emerald-950 dark:text-white text-xs">
-                            Available Inventory Stock (Cartons) <span className="text-red-500">*</span>
-                          </label>
-                          <p className="text-[11px] text-emerald-900/80 dark:text-slate-400">
-                            Enter master cartons count. Pairs count auto-converts ({pairsPerCarton} pairs/carton).
-                          </p>
-                        </div>
-                        <div className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-mono font-bold text-xs shadow-xs">
-                          {totalStock === '' ? 0 : totalStock} Total Pairs Available
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
-                        {/* Cartons Counter */}
-                        <div>
-                          <span className="block text-[10px] font-bold uppercase tracking-wider text-emerald-900/80 dark:text-emerald-300 mb-1">
-                            Carton Boxes Count
-                          </span>
-                          <div className="flex items-center space-x-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const currentCtns = Math.floor((typeof totalStock === 'number' ? totalStock : 0) / pairsPerCarton);
-                                const nextCtns = Math.max(0, currentCtns - 1);
-                                setTotalStock(nextCtns * pairsPerCarton);
-                              }}
-                              className="w-9 h-9 rounded-lg border border-emerald-200 dark:border-emerald-500/40 bg-white dark:bg-white/10 hover:bg-emerald-100 dark:hover:bg-white/20 flex items-center justify-center font-bold text-emerald-950 dark:text-white text-sm transition active:scale-95 cursor-pointer shadow-2xs"
-                            >
-                              -
-                            </button>
-                            <input
-                              type="number"
-                              min="0"
-                              value={Math.floor((typeof totalStock === 'number' ? totalStock : 0) / pairsPerCarton)}
-                              onChange={(e) => {
-                                const ctns = Math.max(0, parseInt(e.target.value, 10) || 0);
-                                setTotalStock(ctns * pairsPerCarton);
-                              }}
-                              placeholder="0"
-                              className="flex-1 py-2 px-3 bg-white dark:bg-slate-950/80 border border-emerald-300 dark:border-emerald-500/40 rounded-lg font-mono font-black text-center text-base text-emerald-950 dark:text-white outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-200 shadow-2xs"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const currentCtns = Math.floor((typeof totalStock === 'number' ? totalStock : 0) / pairsPerCarton);
-                                setTotalStock((currentCtns + 1) * pairsPerCarton);
-                              }}
-                              className="w-9 h-9 rounded-lg border border-emerald-200 dark:border-emerald-500/40 bg-white dark:bg-white/10 hover:bg-emerald-100 dark:hover:bg-white/20 flex items-center justify-center font-bold text-emerald-950 dark:text-white text-sm transition active:scale-95 cursor-pointer shadow-2xs"
-                            >
-                              +
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Direct Pairs Override / Fine Adjustment */}
-                        <div>
-                          <span className="block text-[10px] font-bold uppercase tracking-wider text-emerald-900/80 dark:text-emerald-300 mb-1">
-                            Direct Total Pairs (Exact)
-                          </span>
-                          <input
-                            type="number"
-                            min="0"
-                            value={totalStock}
-                            onChange={(e) => setTotalStock(e.target.value === '' ? '' : Math.max(0, parseInt(e.target.value, 10) || 0))}
-                            placeholder="0"
-                            className="w-full py-2 px-3 bg-white dark:bg-slate-950/80 border border-emerald-300 dark:border-emerald-500/40 rounded-lg font-mono font-bold text-center text-sm text-emerald-950 dark:text-white outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-200 shadow-2xs"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Quick Carton Presets */}
-                      <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-emerald-200/60 dark:border-white/10">
-                        <span className="text-[10px] text-emerald-900/70 dark:text-slate-400 font-bold uppercase">Quick Cartons:</span>
-                        {[1, 5, 10, 20, 50, 100].map((ctn) => (
-                          <button
-                            key={`ctn-quick-${ctn}`}
-                            type="button"
-                            onClick={() => setTotalStock(ctn * pairsPerCarton)}
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold border transition cursor-pointer ${
-                              totalStock === ctn * pairsPerCarton
-                                ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                                : 'bg-white dark:bg-slate-900 text-emerald-900 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-100'
-                            }`}
-                          >
-                            {ctn} {ctn === 1 ? 'Ctn' : 'Ctns'} ({ctn * pairsPerCarton} pr)
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Master Carton Barcode (Optional) */}
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="block font-semibold text-gray-700 dark:text-slate-300 text-xs">
-                          Master Carton Outer Box Barcode (Optional)
-                        </label>
-                        <span className="text-[10px] text-gray-400 font-mono">carton_barcode</span>
-                      </div>
-                      <input
-                        type="text"
-                        placeholder="Scan or enter outer carton box barcode (optional)..."
-                        value={cartonBarcode}
-                        onChange={(e) => setCartonBarcode(e.target.value.trim())}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-xl text-xs font-mono outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 bg-white dark:bg-[#070B14] text-gray-900 dark:text-white"
-                      />
                     </div>
                   </div>
                 ) : (
@@ -1667,7 +1516,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 {/* ===================================================== */}
                 {isWholesaleStore ? (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {/* 1. Cost Price per Pair */}
                       <div className="p-4 bg-slate-50 dark:bg-[#070B14] border border-gray-200 dark:border-slate-800 rounded-2xl space-y-2">
                         <div className="flex items-center justify-between">
@@ -1718,7 +1567,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                           </span>
                         </div>
                         <p className="text-[11px] text-indigo-800/80 dark:text-indigo-300/80">
-                          B2B selling rate per pair (auto-syncs with carton price).
+                          B2B wholesale selling rate per single pair.
                         </p>
                         <div className="relative">
                           <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-indigo-700 dark:text-indigo-300 font-mono font-black text-base">
@@ -1746,37 +1595,6 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                           </p>
                         )}
                       </div>
-
-                      {/* 3. Carton Price (Two-way auto-synced) */}
-                      <div className="p-4 bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/60 rounded-2xl space-y-2">
-                        <div className="flex items-center justify-between">
-                          <label htmlFor="wholesale-carton-price-input" className="block font-bold text-purple-950 dark:text-purple-200 text-xs">
-                            Carton Price ({pairsPerCarton} Pairs) <span className="text-red-500">*</span>
-                          </label>
-                          <span className="text-[10px] font-mono text-purple-700 dark:text-purple-300 font-bold">
-                            cartonPrice
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-purple-800/80 dark:text-purple-300/80">
-                          {pairsPerCarton} pairs &times; rate/pair (modifying adjusts rate).
-                        </p>
-                        <div className="relative">
-                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-purple-700 dark:text-purple-300 font-mono font-black text-base">
-                            {currencySymbol}
-                          </span>
-                          <input
-                            id="wholesale-carton-price-input"
-                            type="number"
-                            min="0"
-                            step="1"
-                            required
-                            placeholder="0"
-                            value={cartonPrice}
-                            onChange={(e) => handleCartonPriceChange(e.target.value)}
-                            className="w-full pl-12 pr-3 py-3 bg-white dark:bg-[#070B14] border-2 rounded-xl font-mono font-black text-lg text-purple-950 dark:text-purple-100 outline-none transition shadow-xs border-purple-400 dark:border-purple-500 focus:border-purple-600"
-                          />
-                        </div>
-                      </div>
                     </div>
 
                     {/* Live Wholesale Profit & Batch Analytics Card */}
@@ -1785,7 +1603,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-bold text-emerald-950 dark:text-emerald-300 flex items-center gap-1.5 uppercase tracking-wider">
                             <TrendingUp className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                            <span>Wholesale Margin &amp; Carton Economics</span>
+                            <span>Wholesale Margin &amp; Lot Economics ({minimumPairs} Pairs Lot)</span>
                           </span>
                           <span className="text-[11px] font-bold font-mono text-emerald-700 dark:text-emerald-400 bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
                             {costPrice > 0 ? `+${Math.round(((wholesalePrice - costPrice) / costPrice) * 100)}% Margin` : 'N/A'}
@@ -1800,15 +1618,15 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                             </span>
                           </div>
                           <div className="p-2 bg-white/80 dark:bg-slate-950/70 rounded-lg border border-emerald-200/60 dark:border-emerald-900/40">
-                            <span className="text-[10px] text-slate-500 block">Profit / Carton</span>
+                            <span className="text-[10px] text-slate-500 block">Profit / Lot ({minimumPairs} pr)</span>
                             <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300">
-                              {currencySymbol} {formatStockPrice((wholesalePrice - costPrice) * pairsPerCarton)}
+                              {currencySymbol} {formatStockPrice((wholesalePrice - costPrice) * minimumPairs)}
                             </span>
                           </div>
                           <div className="p-2 bg-white/80 dark:bg-slate-950/70 rounded-lg border border-emerald-200/60 dark:border-emerald-900/40">
-                            <span className="text-[10px] text-slate-500 block">Carton Sale Value</span>
+                            <span className="text-[10px] text-slate-500 block">Lot Value ({minimumPairs} pr)</span>
                             <span className="font-mono font-bold text-purple-700 dark:text-purple-300">
-                              {currencySymbol} {formatStockPrice(typeof cartonPrice === 'number' ? cartonPrice : wholesalePrice * pairsPerCarton)}
+                              {currencySymbol} {formatStockPrice(wholesalePrice * minimumPairs)}
                             </span>
                           </div>
                           <div className="p-2 bg-white/80 dark:bg-slate-950/70 rounded-lg border border-emerald-200/60 dark:border-emerald-900/40">
@@ -2416,21 +2234,21 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                       </span>
                     </div>
                     <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#070B14] border border-gray-100 dark:border-slate-800">
-                      <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Rate / Carton Price</span>
+                      <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Wholesale Rate</span>
                       <span className="font-mono font-bold text-purple-700 dark:text-purple-300 truncate block">
-                        {currencySymbol} {formatStockPrice(wholesalePrice)}/pr • {currencySymbol} {formatStockPrice(cartonPrice)}/ctn
+                        {currencySymbol} {formatStockPrice(wholesalePrice)}/pr
                       </span>
                     </div>
                     <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#070B14] border border-gray-100 dark:border-slate-800">
-                      <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Cartons / Pairs</span>
+                      <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Minimum Lot Size</span>
+                      <span className="font-mono font-bold text-indigo-700 dark:text-indigo-300 truncate block">
+                        {minimumPairs} Pairs Lot
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#070B14] border border-gray-100 dark:border-slate-800">
+                      <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Total Stock</span>
                       <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300 truncate block">
-                        {Math.floor((typeof totalStock === 'number' ? totalStock : 0) / (pairsPerCarton || 12))} Ctns ({totalStock} pr)
-                      </span>
-                    </div>
-                    <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#070B14] border border-gray-100 dark:border-slate-800">
-                      <span className="text-[10px] text-gray-400 dark:text-slate-500 block">Min Dealer Order</span>
-                      <span className="font-mono font-bold text-amber-700 dark:text-amber-400 truncate block">
-                        {minOrderCartons} Ctn ({minOrderCartons * pairsPerCarton} pr)
+                        {totalStock === '' ? 0 : totalStock} Pairs ({Math.floor((typeof totalStock === 'number' ? totalStock : 0) / minimumPairs)} Lots)
                       </span>
                     </div>
                   </div>

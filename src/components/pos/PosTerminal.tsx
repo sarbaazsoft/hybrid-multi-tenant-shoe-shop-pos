@@ -43,8 +43,10 @@ import { useOfflineSync } from '../../utils/useOfflineSync.ts';
 import { OfflineSyncModal } from './OfflineSyncModal.tsx';
 import { BrandLogo } from '../common/BrandLogo.tsx';
 import { CustomerPicker } from './CustomerPicker.tsx';
+import { PosToast, type PosToastNotification } from './PosToast.tsx';
+import { CartQuantityInput } from './CartQuantityInput.tsx';
 
-interface CartItem {
+export interface CartItem {
   productId: number;
   article: string;
   name?: string;
@@ -59,13 +61,9 @@ interface CartItem {
   minSalePrice: number;
   maxSalePrice?: number;
   unitPrice: number;
-  quantity: number;
-  cartonQuantity?: number;
-  pairsPerCarton?: number;
-  minOrderCartons?: number;
-  cartonPrice?: number;
   wholesalePrice?: number;
-  packingType?: 'PAIR' | 'CARTON';
+  minimumPairs?: number;
+  quantity: number;
   discount: number;
   subtotal: number;
   isPriceOverridden?: boolean;
@@ -130,6 +128,24 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [posToast, setPosToast] = useState<PosToastNotification | null>(null);
+
+  // Trigger high-visibility Toast alert notification and sync with errorMessage banner
+  const triggerValidationToast = (
+    message: string,
+    type: 'warning' | 'error' | 'info' | 'success' = 'warning',
+    title: string = 'Quantity Validation'
+  ) => {
+    playAudioFeedback.warning();
+    setPosToast({
+      id: Date.now(),
+      message,
+      type,
+      title,
+      duration: 4500,
+    });
+    setErrorMessage(message);
+  };
 
   // Business Type & Wholesale B2B Cargo / Dispatch State
   const isWholesaleStore =
@@ -656,14 +672,12 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
 
     const isItemFixed = isFixedPolicy;
 
-    // Wholesale parameters
-    const pairsPerCarton = Math.max(1, Number(product.pairsPerCarton || product.pairs_per_carton || companySettings?.defaultPairsPerCarton || 12));
-    const minOrderCartons = Math.max(1, Number(product.minOrderCartons || product.min_order_cartons || 1));
+    // Wholesale lot size
+    const rawMinPairs = product.minimumPairs ?? product.minimum_pairs ?? product.pairsPerCarton ?? product.pairs_per_carton;
+    const minPairs = Number(rawMinPairs) === 16 ? 16 : 12;
+    const halfCarton = minPairs / 2; // 0.5 carton: 6 pairs if lot size is 12, 8 pairs if lot size is 16
     const wholesaleRate = Math.round(Number(
       product.wholesalePrice ?? product.wholesale_price ?? product.sellingPrice ?? product.selling_price ?? product.maxPrice ?? product.max_price ?? 0
-    ));
-    const cartonPrice = Math.round(Number(
-      product.cartonPrice ?? product.carton_price ?? (wholesaleRate * pairsPerCarton)
     ));
 
     const retailPrice = getProductRetailPrice(product, companySettings);
@@ -673,8 +687,10 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
     const itemMinSalePrice = isItemFixed ? startingUnitPrice : minFloor;
     const itemMaxSalePrice = startingUnitPrice;
 
-    const initialCartons = isWholesaleStore ? minOrderCartons : 0;
-    const initialQuantity = isWholesaleStore ? (minOrderCartons * pairsPerCarton) : 1;
+    // Wholesale starts with 0.5 carton (6 pairs if lot size 12, 8 pairs if lot size 16),
+    // capped by available stock so low stock (e.g. 4 pairs) can still be sold seamlessly!
+    const targetQuantity = isWholesaleStore ? halfCarton : 1;
+    const initialQuantity = Math.max(1, Math.min(targetQuantity, product.totalStock));
 
     setCart((prevCart) => {
       const existingIdx = prevCart.findIndex((item) => item.productId === product.id);
@@ -682,22 +698,21 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
       if (existingIdx >= 0) {
         // Increase quantity of existing row
         const existing = prevCart[existingIdx];
-        const addedQty = isWholesaleStore ? (existing.pairsPerCarton || pairsPerCarton) : 1;
-        const newQty = existing.quantity + addedQty;
-        const newCartons = isWholesaleStore ? ((existing.cartonQuantity || 0) + 1) : undefined;
-
-        if (newQty > product.totalStock) {
+        if (existing.quantity >= product.totalStock) {
           playAudioFeedback.warning();
-          setErrorMessage(`Cannot add more. Stock limit for "${prodIdentifier}" is ${product.totalStock} pairs.`);
+          setErrorMessage(`Cannot add more. All available stock (${product.totalStock} pairs) of "${prodIdentifier}" is already in cart.`);
           return prevCart;
         }
+
+        const lot = Number(existing.minimumPairs || minPairs) === 16 ? 16 : 12;
+        const step = isWholesaleStore ? (lot / 2) : 1;
+        const newQty = Math.min(existing.quantity + step, product.totalStock);
 
         const updated = [...prevCart];
         const subtotal = newQty * existing.unitPrice - existing.discount;
         updated[existingIdx] = {
           ...existing,
           quantity: newQty,
-          cartonQuantity: newCartons,
           subtotal: Math.max(0, subtotal),
         };
         return updated;
@@ -706,12 +721,6 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
         if (product.totalStock <= 0) {
           playAudioFeedback.warning();
           setErrorMessage(`Product "${prodIdentifier}" is OUT OF STOCK (0 pairs available).`);
-          return prevCart;
-        }
-
-        if (initialQuantity > product.totalStock) {
-          playAudioFeedback.warning();
-          setErrorMessage(`Cannot add "${prodIdentifier}". Requires min ${minOrderCartons} carton (${initialQuantity} pairs), but only ${product.totalStock} pairs available.`);
           return prevCart;
         }
 
@@ -730,11 +739,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
           maxSalePrice: itemMaxSalePrice,
           unitPrice: startingUnitPrice,
           wholesalePrice: wholesaleRate,
-          cartonPrice: cartonPrice,
-          pairsPerCarton: pairsPerCarton,
-          minOrderCartons: minOrderCartons,
-          packingType: isWholesaleStore ? 'CARTON' : 'PAIR',
-          cartonQuantity: isWholesaleStore ? initialCartons : undefined,
+          minimumPairs: minPairs,
           quantity: initialQuantity,
           discount: 0,
           subtotal: initialQuantity * startingUnitPrice,
@@ -750,25 +755,48 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
     focusScannerInput(continuousScan);
   };
 
-  // Update Cart Item Quantity (Pairs)
+  // Update Cart Item Quantity (Pairs, stepping in 0.5 carton / 6 or 8 pairs increments for wholesale)
   const updateQuantity = (productId: number, delta: number) => {
     setCart((prevCart) =>
       prevCart
         .map((item) => {
           if (item.productId === productId) {
-            const nextQty = item.quantity + delta;
-            if (nextQty <= 0) return null;
-            if (nextQty > item.totalStock) {
-              setErrorMessage(`Cannot exceed available stock of ${item.totalStock} for "${item.article || item.name}".`);
+            const lot = Number(item.minimumPairs || 12) === 16 ? 16 : 12;
+            const halfLot = lot / 2; // 6 if 12, 8 if 16
+
+            // Wholesale store constraint: prevent decrementing below minimum allowed threshold (0.5 Carton)
+            if (isWholesaleStore && delta < 0 && item.quantity <= halfLot) {
               return item;
             }
-            const ppc = item.pairsPerCarton || 12;
-            const nextCartons = isWholesaleStore ? Math.max(1, Math.round(nextQty / ppc)) : undefined;
+
+            // delta === 1 means +0.5 carton; delta === -1 means -0.5 carton; delta > 1 or < -1 means exact pairs (e.g. +12 or +16 for full carton)
+            const effectiveDelta = isWholesaleStore
+              ? (delta === 1 ? halfLot : delta === -1 ? -halfLot : delta)
+              : delta;
+            let nextQty = item.quantity + effectiveDelta;
+
+            if (isWholesaleStore) {
+              // Strictly enforce minimum threshold of halfLot for wholesale items; never remove via stepper
+              if (nextQty < halfLot) {
+                nextQty = halfLot;
+              }
+            } else {
+              // Retail: decrementing below 1 can remove or clamp to 0
+              if (nextQty <= 0) return null;
+            }
+
+            if (nextQty > item.totalStock) {
+              if (item.quantity < item.totalStock) {
+                nextQty = item.totalStock;
+              } else {
+                setErrorMessage(`Cannot exceed available stock of ${item.totalStock} for "${item.article || item.name}".`);
+                return item;
+              }
+            }
             const subtotal = nextQty * item.unitPrice - item.discount;
             return {
               ...item,
               quantity: nextQty,
-              cartonQuantity: nextCartons,
               subtotal: Math.max(0, subtotal),
             };
           }
@@ -780,29 +808,61 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
     focusScannerInput(continuousScan);
   };
 
-  // Update Wholesale Cart Item Quantity (Master Cartons)
-  const updateCartons = (productId: number, deltaCartons: number) => {
+  // Direct numeric quantity update from input field
+  const updateDirectQuantity = (productId: number, exactQty: number) => {
     setCart((prevCart) =>
       prevCart
         .map((item) => {
           if (item.productId === productId) {
-            const currentCtns = item.cartonQuantity || 1;
-            const nextCtns = currentCtns + deltaCartons;
-            if (nextCtns <= 0) return null;
+            if (exactQty <= 0) return null;
 
-            const ppc = item.pairsPerCarton || 12;
-            const nextTotalPairs = nextCtns * ppc;
+            let targetQty = exactQty;
 
-            if (nextTotalPairs > item.totalStock) {
-              setErrorMessage(`Cannot exceed available stock of ${item.totalStock} pairs (${Math.floor(item.totalStock / ppc)} cartons) for "${item.article || item.name}".`);
-              return item;
+            if (isWholesaleStore) {
+              const lot = Number(item.minimumPairs || 12) === 16 ? 16 : 12;
+              const halfLot = lot / 2;
+              const minAllowed = halfLot;
+              const cartonDesc = minAllowed === lot ? '1 Carton' : '0.5 Carton';
+
+              if (targetQty < minAllowed) {
+                triggerValidationToast(
+                  `Invalid Quantity: Minimum order quantity for this item is ${minAllowed} pairs (${cartonDesc}).`,
+                  'warning',
+                  'Wholesale Minimum Required'
+                );
+                targetQty = Math.min(minAllowed, Math.max(1, item.totalStock));
+              } else if (targetQty % halfLot !== 0) {
+                const nearest = Math.round(targetQty / halfLot) * halfLot;
+                triggerValidationToast(
+                  `Quantity must be added in multiples of 0.5 Carton (${halfLot} pairs)`,
+                  'warning',
+                  'Multiple Validation'
+                );
+                targetQty = Math.max(minAllowed, nearest);
+              }
             }
 
-            const subtotal = nextTotalPairs * item.unitPrice - item.discount;
+            if (targetQty > item.totalStock) {
+              triggerValidationToast(
+                `Stock limit for "${item.article || item.name}" is ${item.totalStock} pairs.`,
+                'warning',
+                'Stock Limit Exceeded'
+              );
+              if (isWholesaleStore) {
+                const lot = Number(item.minimumPairs || 12) === 16 ? 16 : 12;
+                const halfLot = lot / 2;
+                const maxMult = Math.floor(item.totalStock / halfLot) * halfLot;
+                targetQty = maxMult >= halfLot ? maxMult : Math.min(item.totalStock, halfLot);
+              } else {
+                targetQty = item.totalStock;
+              }
+            }
+
+            const clampedQty = Math.max(1, targetQty);
+            const subtotal = clampedQty * item.unitPrice - item.discount;
             return {
               ...item,
-              cartonQuantity: nextCtns,
-              quantity: nextTotalPairs,
+              quantity: clampedQty,
               subtotal: Math.max(0, subtotal),
             };
           }
@@ -810,7 +870,11 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
         })
         .filter(Boolean) as CartItem[]
     );
-    focusScannerInput(continuousScan);
+  };
+
+  // Update Wholesale Cart Item Quantity (kept for backward-compatible call paths, delegates to updateQuantity)
+  const updateCartons = (productId: number, deltaCartons: number) => {
+    updateQuantity(productId, deltaCartons);
   };
 
   // Update Cart Item Price (Directly editable in cart)
@@ -939,12 +1003,25 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
     // Wholesale Minimum Order & Dealer Validation
     if (isWholesaleStore) {
       for (const item of cart) {
-        const ctns = item.cartonQuantity || 1;
-        const minCtns = item.minOrderCartons || 1;
-        if (ctns < minCtns) {
-          playAudioFeedback.warning();
-          setErrorMessage(
-            `Minimum Order Limit: "${item.article}" requires at least ${minCtns} carton(s) (${minCtns * (item.pairsPerCarton || 12)} pairs). Current quantity is ${ctns} carton(s).`
+        const lot = Number(item.minimumPairs) === 16 ? 16 : 12;
+        const halfLot = lot / 2; // 0.5 carton (6 or 8 pairs)
+        const minAllowed = halfLot;
+        const cartonDesc = minAllowed === lot ? '1 Carton' : '0.5 Carton';
+
+        if (item.quantity < minAllowed && item.totalStock >= minAllowed) {
+          triggerValidationToast(
+            `Invalid Quantity: Minimum order quantity for this item is ${minAllowed} pairs (${cartonDesc}).`,
+            'error',
+            'Wholesale Minimum Required'
+          );
+          return;
+        }
+
+        if (item.quantity % halfLot !== 0 && item.quantity < item.totalStock) {
+          triggerValidationToast(
+            `Quantity must be added in multiples of 0.5 Carton (${halfLot} pairs)`,
+            'error',
+            'Carton Multiple Required'
           );
           return;
         }
@@ -960,7 +1037,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
     setIsSubmitting(true);
 
     const totalCartonsSum = isWholesaleStore
-      ? cart.reduce((acc, i) => acc + (i.cartonQuantity || 0), 0)
+      ? Number(cart.reduce((acc, i) => acc + (i.quantity / (Number(i.minimumPairs) === 16 ? 16 : 12)), 0).toFixed(2))
       : 0;
 
     const selectedCust = customers.find((c: any) => c.id === selectedCustomerId);
@@ -973,15 +1050,18 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
       : 0;
 
     const payload: any = {
-      items: cart.map((i) => ({
-        productId: i.productId,
-        quantity: i.quantity,
-        cartonQuantity: i.cartonQuantity,
-        pairsPerCarton: i.pairsPerCarton,
-        packingType: i.packingType || (isWholesaleStore ? 'CARTON' : 'PAIR'),
-        unitPrice: i.unitPrice,
-        discount: i.discount,
-      })),
+      items: cart.map((i) => {
+        const lot = Number(i.minimumPairs) === 16 ? 16 : 12;
+        return {
+          productId: i.productId,
+          quantity: i.quantity,
+          cartonQuantity: isWholesaleStore ? Number((i.quantity / lot).toFixed(2)) : 1,
+          pairsPerCarton: isWholesaleStore ? lot : 1,
+          packingType: isWholesaleStore ? 'CARTON' : 'PAIR',
+          unitPrice: i.unitPrice,
+          discount: i.discount,
+        };
+      }),
       customerId: selectedCustomerId,
       paymentMethod,
       saleType: isWholesaleStore ? 'WHOLESALE' : 'RETAIL',
@@ -1748,15 +1828,11 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                         </div>
                         {isWholesaleStore && (
                           <div className="flex items-center gap-1.5 mt-1 flex-wrap text-[10px] font-mono">
-                            <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-semibold">
-                              📦 {item.pairsPerCarton || 12} pairs/ctn
+                            <span className="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 font-semibold">
+                              📦 Lot Size: {Number(item.minimumPairs) === 16 ? 16 : 12} pairs/ctn
                             </span>
-                            <span className={`px-1.5 py-0.5 rounded font-bold border ${
-                              (item.cartonQuantity || 1) < (item.minOrderCartons || 1)
-                                ? 'bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800'
-                                : 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
-                            }`}>
-                              Min Order: {item.minOrderCartons || 1} Ctn ({((item.minOrderCartons || 1) * (item.pairsPerCarton || 12))} pr)
+                            <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-semibold">
+                              Min Lot: {Number(item.minimumPairs) === 16 ? 16 : 12} pairs
                             </span>
                           </div>
                         )}
@@ -1790,40 +1866,65 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
 
                       {/* Quantity Controls */}
                       <td className="py-3 px-3">
-                        {isWholesaleStore ? (
-                          <div className="flex flex-col items-center">
-                            <div className="flex items-center justify-center space-x-1">
-                              <button
-                                type="button"
-                                onClick={() => updateCartons(item.productId, -1)}
-                                className="p-1 rounded bg-slate-100 dark:bg-[#131B2E] hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 active:scale-95 transition border border-slate-200/60 dark:border-slate-700 cursor-pointer"
-                                title="Decrease cartons"
-                              >
-                                <Minus className="w-3.5 h-3.5" />
-                              </button>
-                              <span className="min-w-14 px-1 text-center font-bold text-slate-900 dark:text-white text-xs font-mono">
-                                {item.cartonQuantity || 1} {((item.cartonQuantity || 1) === 1 ? 'Ctn' : 'Ctns')}
+                        {isWholesaleStore ? (() => {
+                          const lotSize = Number(item.minimumPairs || 12) === 16 ? 16 : 12;
+                          const halfCartonStep = lotSize / 2; // 6 pairs for 12, 8 pairs for 16
+                          const isMinusDisabled = item.quantity <= halfCartonStep;
+                          const minusTooltip = isMinusDisabled
+                            ? `Minimum order quantity is 0.5 Carton (${halfCartonStep} pairs)`
+                            : `Decrease ${halfCartonStep} pairs (0.5 Carton)`;
+
+                          return (
+                            <div className="flex flex-col items-center">
+                              <div className="flex items-center justify-center space-x-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (isMinusDisabled) return;
+                                    updateQuantity(item.productId, -1);
+                                  }}
+                                  disabled={isMinusDisabled}
+                                  className={`p-1 rounded transition border ${
+                                    isMinusDisabled
+                                      ? 'bg-slate-100/60 dark:bg-slate-800/40 text-slate-400 dark:text-slate-600 border-slate-200/40 dark:border-slate-800 cursor-not-allowed opacity-40'
+                                      : 'bg-slate-100 dark:bg-[#131B2E] hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 active:scale-95 border-slate-200/60 dark:border-slate-700 cursor-pointer'
+                                  }`}
+                                  title={minusTooltip}
+                                >
+                                  <Minus className="w-3.5 h-3.5" />
+                                </button>
+                                <CartQuantityInput
+                                  item={item}
+                                  isWholesaleStore={true}
+                                  onCommitQuantity={(productId, exactQty) => updateDirectQuantity(productId, exactQty)}
+                                  onValidationAlert={(msg, type) => triggerValidationToast(msg, type, 'Wholesale Quantity Alert')}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => updateQuantity(item.productId, 1)}
+                                  disabled={item.quantity >= item.totalStock}
+                                  className="p-1 rounded bg-slate-100 dark:bg-[#131B2E] hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 active:scale-95 disabled:opacity-40 transition border border-slate-200/60 dark:border-slate-700 cursor-pointer"
+                                  title={`Increase ${halfCartonStep} pairs (0.5 Carton)`}
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => updateQuantity(item.productId, lotSize)}
+                                  disabled={item.quantity >= item.totalStock}
+                                  className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-indigo-50 dark:bg-indigo-950/70 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 active:scale-95 disabled:opacity-40 transition border border-indigo-200 dark:border-indigo-800 cursor-pointer"
+                                  title={`Add 1 full carton (+${lotSize} pairs)`}
+                                >
+                                  +1 Ctn
+                                </button>
+                              </div>
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
+                                {((item.quantity) / lotSize).toFixed(1).replace(/\.0$/, '')}{' '}
+                                {((item.quantity) / lotSize === 1 ? 'Carton' : 'Cartons')} ({lotSize} pr/ctn)
                               </span>
-                              <button
-                                type="button"
-                                onClick={() => updateCartons(item.productId, 1)}
-                                disabled={((item.cartonQuantity || 1) + 1) * (item.pairsPerCarton || 12) > item.totalStock}
-                                className="p-1 rounded bg-slate-100 dark:bg-[#131B2E] hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 active:scale-95 disabled:opacity-40 transition border border-slate-200/60 dark:border-slate-700 cursor-pointer"
-                                title="Increase cartons"
-                              >
-                                <Plus className="w-3.5 h-3.5" />
-                              </button>
                             </div>
-                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
-                              {item.quantity} pairs ({item.pairsPerCarton || 12} pr/ctn)
-                            </span>
-                            {(item.cartonQuantity || 1) < (item.minOrderCartons || 1) && (
-                              <span className="text-[9px] font-bold text-rose-600 dark:text-rose-400 mt-0.5">
-                                Min: {item.minOrderCartons || 1} Ctns
-                              </span>
-                            )}
-                          </div>
-                        ) : (
+                          );
+                        })() : (
                           <div className="flex items-center justify-center space-x-1">
                             <button
                               type="button"
@@ -1832,9 +1933,12 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                             >
                               <Minus className="w-3.5 h-3.5" />
                             </button>
-                            <span className="w-8 text-center font-bold text-slate-900 dark:text-white text-sm">
-                              {item.quantity}
-                            </span>
+                            <CartQuantityInput
+                              item={item}
+                              isWholesaleStore={false}
+                              onCommitQuantity={(productId, exactQty) => updateDirectQuantity(productId, exactQty)}
+                              onValidationAlert={(msg, type) => triggerValidationToast(msg, type, 'Quantity Alert')}
+                            />
                             <button
                               type="button"
                               onClick={() => updateQuantity(item.productId, 1)}
@@ -1905,7 +2009,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                           {isWholesaleStore ? (
                             <div className="text-[10px] text-indigo-600 dark:text-indigo-400 font-mono mt-1 space-y-0.5 text-right flex items-center justify-end gap-1">
                               <Package className="w-3 h-3 text-indigo-500 shrink-0" />
-                              <span className="font-semibold">{currencySymbol} {formatStockPrice(item.unitPrice * (item.pairsPerCarton || 12))} / carton</span>
+                              <span className="font-semibold">{currencySymbol} {formatStockPrice(item.unitPrice * (Number(item.minimumPairs) === 16 ? 16 : 12))} / carton</span>
                             </div>
                           ) : isItemFixed ? (
                             <div className="text-[10px] text-purple-700 dark:text-purple-400 font-mono mt-1 space-y-0.5 text-right flex items-center justify-end gap-1">
@@ -2459,7 +2563,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                     <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-mono px-1">
                       <span>Total Cartons to Dispatch:</span>
                       <strong className="text-slate-800 dark:text-slate-200 font-bold">
-                        {cart.reduce((acc, i) => acc + (i.cartonQuantity || 0), 0)} Cartons ({totalItemsCount} Pairs)
+                        {cart.reduce((acc, i) => acc + (i.quantity / (Number(i.minimumPairs) === 16 ? 16 : 12)), 0).toFixed(1).replace(/\.0$/, '')} Cartons ({totalItemsCount} Pairs)
                       </strong>
                     </div>
                   </div>
@@ -2658,6 +2762,9 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
         }}
         currencySymbol={currencySymbol}
       />
+
+      {/* POS FLOATING VALIDATION & ERROR TOAST */}
+      <PosToast toast={posToast} onDismiss={() => setPosToast(null)} />
     </div>
   );
 };

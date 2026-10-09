@@ -66,6 +66,12 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
   const biltyNumber = String(sale.bilty_number || '').trim();
   const bookingDestination = String(sale.booking_destination || '').trim();
   const totalCartons = Number(sale.total_cartons || 0);
+  const displayTotalCartons = totalCartons > 0
+    ? (totalCartons % 1 === 0 ? totalCartons.toString() : totalCartons.toFixed(1))
+    : (() => {
+        const sum = items.reduce((acc: number, it: any) => acc + (parseFloat(it.carton_quantity || it.cartonQuantity || 0) || ((Number(it.quantity) || 0) / (Number(it.minimum_pairs || it.minimumPairs || 12)))), 0);
+        return sum > 0 ? (sum % 1 === 0 ? sum.toString() : sum.toFixed(1)) : '0';
+      })();
 
   // Digital Receipt State (SMS & WhatsApp)
   const [recipientPhone, setRecipientPhone] = useState<string>(customerPhone);
@@ -672,7 +678,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                   <div>
                     <span className="text-[10px] text-gray-500 font-semibold uppercase block">Total Master Cartons</span>
                     <strong className="text-indigo-700 font-mono font-black">
-                      {totalCartons || items.reduce((acc: number, it: any) => acc + (it.carton_quantity || it.cartonQuantity || 1), 0)} Ctns
+                      {displayTotalCartons} Ctns
                     </strong>
                   </div>
                 </div>
@@ -703,8 +709,12 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {items.map((item: any, idx: number) => {
-                    const ctnQty = item.carton_quantity || item.cartonQuantity || Math.max(1, Math.round(item.quantity / (item.pairs_per_carton || item.pairsPerCarton || 12)));
-                    const ppc = item.pairs_per_carton || item.pairsPerCarton || 12;
+                    const ppc = item.minimum_pairs || item.minimumPairs || item.pairs_per_carton || item.pairsPerCarton || 12;
+                    const rawCtn = item.carton_quantity ?? item.cartonQuantity ?? (item.quantity / ppc);
+                    const parsedCtn = parseFloat(String(rawCtn));
+                    const ctnQty = !isNaN(parsedCtn) && parsedCtn > 0
+                      ? (parsedCtn % 1 === 0 ? parsedCtn.toString() : parsedCtn.toFixed(1))
+                      : ((item.quantity / ppc) % 1 === 0 ? (item.quantity / ppc).toString() : (item.quantity / ppc).toFixed(1));
 
                     return (
                       <tr key={idx}>
@@ -980,7 +990,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                 </div>
                 <div>
                   <span style={{ fontSize: '9px', color: '#666', textTransform: 'uppercase', display: 'block' }}>Total Cartons</span>
-                  <strong>{totalCartons || items.reduce((acc: number, it: any) => acc + (it.carton_quantity || it.cartonQuantity || 1), 0)} Ctns</strong>
+                  <strong>{displayTotalCartons} Ctns</strong>
                 </div>
               </div>
             )}
@@ -1009,8 +1019,12 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
               </thead>
               <tbody>
                 {items.map((item: any, idx: number) => {
-                  const ctnQty = item.carton_quantity || item.cartonQuantity || Math.max(1, Math.round(item.quantity / (item.pairs_per_carton || item.pairsPerCarton || 12)));
-                  const ppc = item.pairs_per_carton || item.pairsPerCarton || 12;
+                  const ppc = item.minimum_pairs || item.minimumPairs || item.pairs_per_carton || item.pairsPerCarton || 12;
+                  const rawCtn = item.carton_quantity ?? item.cartonQuantity ?? (item.quantity / ppc);
+                  const parsedCtn = parseFloat(String(rawCtn));
+                  const ctnQty = !isNaN(parsedCtn) && parsedCtn > 0
+                    ? (parsedCtn % 1 === 0 ? parsedCtn.toString() : parsedCtn.toFixed(1))
+                    : ((item.quantity / ppc) % 1 === 0 ? (item.quantity / ppc).toString() : (item.quantity / ppc).toFixed(1));
 
                   return (
                     <tr key={idx} style={{ borderBottom: '1px solid #ddd' }}>

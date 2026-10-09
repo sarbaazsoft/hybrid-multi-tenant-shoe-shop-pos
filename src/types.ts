@@ -238,7 +238,6 @@ export interface Product {
   categoryName?: string;
   sku: string;
   barcode: string;
-  cartonBarcode?: string;
   primaryImageUrl: string;
   description?: string;
   costPrice: number;
@@ -246,10 +245,7 @@ export interface Product {
   minPrice: number;
   maxPrice: number;
   wholesalePrice?: number;
-  cartonPrice?: number;
-  pairsPerCarton?: number;
-  minOrderCartons?: number;
-  totalCartons?: number;
+  minimumPairs?: number; // Wholesale lot size: 12 or 16 pairs
   salePrice?: number | null;
   minSalePrice?: number | null;
   maxSalePrice?: number | null;
@@ -305,12 +301,8 @@ export interface CartItem {
   sku: string;
   barcode: string;
   quantity: number;
-  cartonQuantity?: number;
-  pairsPerCarton?: number;
-  minOrderCartons?: number;
-  packingType?: 'PAIR' | 'CARTON';
+  minimumPairs?: number;
   unitPrice: number;
-  cartonPrice?: number;
   wholesalePrice?: number;
   sellingPrice?: number;
   minPrice?: number;
