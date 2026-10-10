@@ -442,9 +442,45 @@ router.post('/checkout', requireAuth, async (req: AuthenticatedRequest, res: Res
     const transportName = String(req.body.transportName || req.body.transport_name || '').trim();
     const biltyNumber = String(req.body.biltyNumber || req.body.bilty_number || '').trim();
     const bookingDestination = String(req.body.bookingDestination || req.body.booking_destination || '').trim();
-    const previousBalance = parseFloat(String(req.body.previousBalance || req.body.previous_balance || 0)) || 0;
-    const paidAmount = parseFloat(String(req.body.paidAmount || req.body.paid_amount || (paymentMethod === 'KHATA' ? effectiveCashReceived : calculatedTotalAmount))) || 0;
-    const remainingBalance = Math.max(0, calculatedTotalAmount - paidAmount);
+
+    // Fetch authoritative customer previous balance
+    let customerPreviousBalance = 0;
+    const targetCustomerId = customerId ? parseInt(customerId, 10) : (origSale ? origSale.customer_id : null);
+    if (targetCustomerId) {
+      const custBalRes = await pgClient.query<{ outstanding_balance: string; current_balance: string }>(
+        `SELECT COALESCE(outstanding_balance, current_balance, 0)::numeric as outstanding_balance FROM customers WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+        [targetCustomerId, tenantId]
+      );
+      if (custBalRes.rows.length > 0) {
+        customerPreviousBalance = Math.max(0, parseFloat(custBalRes.rows[0].outstanding_balance || '0'));
+      }
+    }
+
+    // Invoice Calculation Logic:
+    // Total Amount Due on New Invoice = Current_Cart_Total + Customer_Previous_Balance
+    // Remaining Balance = Total_Amount_Due - Payment_Received
+    const currentCartTotal = Math.max(0, netDifference);
+    const totalAmountDue = Math.round((currentCartTotal + customerPreviousBalance) * 100) / 100;
+
+    let paymentReceived = 0;
+    const rawPaid = typeof req.body.paidAmount !== 'undefined'
+      ? req.body.paidAmount
+      : (typeof req.body.amountReceived !== 'undefined'
+        ? req.body.amountReceived
+        : req.body.cashReceived);
+
+    if (paymentMethod === 'KHATA') {
+      paymentReceived = typeof rawPaid === 'number' ? rawPaid : (parseFloat(String(rawPaid || 0)) || 0);
+    } else {
+      paymentReceived = typeof rawPaid === 'number'
+        ? rawPaid
+        : (parseFloat(String(rawPaid ?? totalAmountDue)) || totalAmountDue);
+    }
+    const effectivePaidAmount = Math.max(0, Math.round(paymentReceived * 100) / 100);
+    const remainingBalance = Math.max(0, Math.round((totalAmountDue - effectivePaidAmount) * 100) / 100);
+    const changeGivenDue = effectivePaidAmount > totalAmountDue
+      ? Math.round((effectivePaidAmount - totalAmountDue) * 100) / 100
+      : (netDifference < 0 ? Math.abs(netDifference) : 0);
 
     const saleRes = await pgClient.query<{ id: number }>(
       `INSERT INTO sales (
@@ -459,20 +495,20 @@ router.post('/checkout', requireAuth, async (req: AuthenticatedRequest, res: Res
         tenantId,
         invoiceNumber,
         saleType,
-        customerId ? parseInt(customerId, 10) : (origSale ? origSale.customer_id : null),
+        targetCustomerId,
         calculatedSubtotal,
         calculatedTotalDiscount,
-        calculatedTotalAmount,
+        totalAmountDue,
         totalCartons,
         transportName,
         biltyNumber,
         bookingDestination,
-        previousBalance,
-        paidAmount,
+        customerPreviousBalance,
+        effectivePaidAmount,
         remainingBalance,
         paymentMethod,
-        effectiveCashReceived,
-        effectiveChangeGiven,
+        effectivePaidAmount,
+        changeGivenDue,
         user.id,
         verifiedOverrideAdminId !== null,
         verifiedOverrideAdminId,
@@ -515,11 +551,35 @@ router.post('/checkout', requireAuth, async (req: AuthenticatedRequest, res: Res
       );
     }
 
-    // Update customer Khata balance if credit / remainder booked to Khata
-    if (customerId && remainingBalance > 0) {
+    // Update Customer outstanding_balance = Remaining_Balance and record in Khata Ledger history
+    if (targetCustomerId) {
       await pgClient.query(
-        `UPDATE customers SET current_balance = COALESCE(current_balance, 0) + $1 WHERE id = $2 AND tenant_id = $3`,
-        [remainingBalance, parseInt(customerId, 10), tenantId]
+        `UPDATE customers
+         SET outstanding_balance = $1,
+             current_balance = $1
+         WHERE id = $2 AND tenant_id = $3`,
+        [remainingBalance, targetCustomerId, tenantId]
+      );
+
+      const balanceChange = Math.round((currentCartTotal - effectivePaidAmount) * 100) / 100;
+      await pgClient.query(
+        `INSERT INTO customer_khata_ledger (
+          tenant_id, customer_id, transaction_date, invoice_id, invoice_number,
+          total_bill, amount_paid, balance_change, running_balance, payment_method, notes
+        ) VALUES ($1, $2, COALESCE($3, NOW()::date::text), $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [
+          tenantId,
+          targetCustomerId,
+          effectiveSaleDate,
+          saleId,
+          invoiceNumber,
+          currentCartTotal,
+          effectivePaidAmount,
+          balanceChange,
+          remainingBalance,
+          paymentMethod,
+          `Invoice #${invoiceNumber} (Items: Rs. ${currentCartTotal}, Prev Khata: Rs. ${customerPreviousBalance})`,
+        ]
       );
     }
 
@@ -528,7 +588,8 @@ router.post('/checkout', requireAuth, async (req: AuthenticatedRequest, res: Res
     const fullSale = await pgClient.query(
       `SELECT s.*, u.name as cashier_name, c.name as customer_name, c.phone as customer_phone,
               c.shop_name as customer_shop_name, c.city as customer_city, c.market_name as customer_market_name,
-              c.current_balance as customer_current_balance
+              COALESCE(c.outstanding_balance, c.current_balance, 0)::numeric as customer_outstanding_balance,
+              COALESCE(c.current_balance, c.outstanding_balance, 0)::numeric as customer_current_balance
        FROM sales s
        LEFT JOIN users u ON s.created_by = u.id
        LEFT JOIN customers c ON s.customer_id = c.id

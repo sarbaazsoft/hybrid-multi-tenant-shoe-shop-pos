@@ -269,6 +269,8 @@ export interface Customer {
   notes?: string;
   creditLimit?: number;
   currentBalance?: number;
+  outstandingBalance?: number;
+  outstanding_balance?: number;
   ntnNumber?: string;
   totalPurchases?: number;
   totalOrders?: number;
@@ -277,6 +279,31 @@ export interface Customer {
   balance?: number | string;
   lastVisit?: string | null;
   createdAt: string;
+}
+
+export interface CustomerKhataLedgerEntry {
+  id: number;
+  tenantId?: number;
+  customerId: number;
+  transactionDate: string;
+  transaction_date?: string;
+  invoiceId?: number | null;
+  invoice_id?: number | null;
+  invoiceNumber?: string;
+  invoice_number?: string;
+  totalBill: number;
+  total_bill?: number;
+  amountPaid: number;
+  amount_paid?: number;
+  balanceChange: number;
+  balance_change?: number;
+  runningBalance: number;
+  running_balance?: number;
+  paymentMethod?: string;
+  payment_method?: string;
+  notes?: string;
+  createdAt?: string;
+  created_at?: string;
 }
 
 export interface Supplier {

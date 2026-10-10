@@ -45,6 +45,7 @@ import { BrandLogo } from '../common/BrandLogo.tsx';
 import { CustomerPicker } from './CustomerPicker.tsx';
 import { PosToast, type PosToastNotification } from './PosToast.tsx';
 import { CartQuantityInput } from './CartQuantityInput.tsx';
+import { PosCheckoutModal } from './PosCheckoutModal.tsx';
 
 export interface CartItem {
   productId: number;
@@ -167,6 +168,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
 
   // Completed Invoice & Print Modal
   const [completedSale, setCompletedSale] = useState<any | null>(null);
+  const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false);
 
   // Floor protection notice for clamped prices in cart
   const [cartFloorNotice, setCartFloorNotice] = useState<{ productId: number; message: string } | null>(null);
@@ -318,14 +320,16 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
       return;
     }
 
-    if (cart.length > 0 && !isSubmitting) {
-      handleCheckout();
-    } else if (cart.length === 0) {
+    if (cart.length === 0 && !activeExchange) {
       playAudioFeedback.warning();
-      setErrorMessage('Cannot print receipt: cart is empty. Scan barcode or search article first.');
+      setErrorMessage('Cannot checkout: cart is empty. Scan barcode or search article first.');
       setTimeout(() => setErrorMessage(null), 3000);
       focusScannerInput();
+      return;
     }
+
+    // Open dedicated POS Checkout Modal
+    setIsCheckoutModalOpen(true);
   };
 
   // Keyboard shortcut listener & Smart Scanner Global Focus Redirect
@@ -1041,13 +1045,22 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
       : 0;
 
     const selectedCust = customers.find((c: any) => c.id === selectedCustomerId);
-    const prevBalance = parseFloat(selectedCust?.current_balance ?? selectedCust?.currentBalance ?? selectedCust?.balance ?? 0) || 0;
+    const prevBalance = parseFloat(
+      selectedCust?.outstanding_balance ??
+      selectedCust?.outstandingBalance ??
+      selectedCust?.current_balance ??
+      selectedCust?.currentBalance ??
+      selectedCust?.balance ??
+      0
+    ) || 0;
+    const totalAmountDue = Math.round((netTotalPayable + prevBalance) * 100) / 100;
     const effectivePaidAmount = paymentMethod === 'KHATA'
       ? (typeof cashReceived === 'number' ? cashReceived : 0)
-      : netTotalPayable;
-    const remainingBalance = paymentMethod === 'KHATA'
-      ? Math.max(0, netTotalPayable - effectivePaidAmount)
-      : 0;
+      : (typeof cashReceived === 'number' ? cashReceived : (cashReceived === '' ? totalAmountDue : parseFloat(String(cashReceived)) || totalAmountDue));
+    const remainingBalance = Math.max(0, Math.round((totalAmountDue - effectivePaidAmount) * 100) / 100);
+    const changeGivenDue = effectivePaidAmount > totalAmountDue
+      ? Math.round((effectivePaidAmount - totalAmountDue) * 100) / 100
+      : (netDifference < 0 ? Math.abs(netDifference) : 0);
 
     const payload: any = {
       items: cart.map((i) => {
@@ -1071,9 +1084,10 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
       bookingDestination: isWholesaleStore ? bookingDestination.trim() : undefined,
       previousBalance: prevBalance,
       paidAmount: effectivePaidAmount,
+      amountReceived: effectivePaidAmount,
       remainingBalance,
-      cashReceived: paymentMethod === 'KHATA' ? effectivePaidAmount : effectiveCashReceived,
-      changeGiven: changeDue,
+      cashReceived: effectivePaidAmount,
+      changeGiven: changeGivenDue,
       notes,
       isMinPriceOverridden: Boolean(adminOverrideCreds || currentUser.role === 'ADMIN'),
       adminOverrideEmail: adminOverrideCreds?.email || null,
@@ -1161,6 +1175,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
       playAudioFeedback.saleSuccess();
 
       // Set completed sale to show print receipt modal
+      setIsCheckoutModalOpen(false);
       setCompletedSale(res.sale);
 
       // Reset cart & exchange state
@@ -2329,46 +2344,64 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
             </div>
 
             {/* Khata Credit Ledger Details for Wholesale Dealers */}
-            {paymentMethod === 'KHATA' && (
+            {(paymentMethod === 'KHATA' || (selectedCustomerId && isWholesaleStore)) && (
               <div className="space-y-2.5 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
                 {(() => {
                   const selectedCust = customers.find((c: any) => c.id === selectedCustomerId);
-                  const prevBal = parseFloat(selectedCust?.current_balance ?? selectedCust?.currentBalance ?? selectedCust?.balance ?? 0) || 0;
+                  const prevBal = parseFloat(
+                    selectedCust?.outstanding_balance ??
+                    selectedCust?.outstandingBalance ??
+                    selectedCust?.current_balance ??
+                    selectedCust?.currentBalance ??
+                    selectedCust?.balance ??
+                    0
+                  ) || 0;
+                  const currentItemsTot = netTotalPayable;
+                  const netPayable = Math.round((currentItemsTot + prevBal) * 100) / 100;
                   const paidNow = typeof cashReceived === 'number' ? cashReceived : 0;
-                  const remBal = Math.max(0, netTotalPayable - paidNow);
+                  const remBal = Math.max(0, Math.round((netPayable - paidNow) * 100) / 100);
                   const credLimit = parseFloat(selectedCust?.credit_limit ?? selectedCust?.creditLimit ?? 0) || 0;
 
                   return selectedCust ? (
-                    <div className="p-3 bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 rounded-xl space-y-2">
+                    <div className="p-3 bg-gradient-to-b from-indigo-50/80 to-purple-50/50 dark:from-indigo-950/40 dark:to-purple-950/30 border border-indigo-200 dark:border-indigo-800/60 rounded-xl space-y-2">
                       <div className="flex items-center justify-between font-bold text-indigo-900 dark:text-indigo-200">
                         <span className="flex items-center gap-1.5">
                           <BookOpen className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                          <span>Dealer Khata Ledger</span>
+                          <span>Dealer Khata Balance</span>
                         </span>
-                        <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-indigo-200/60 dark:bg-indigo-900/80">
+                        <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-indigo-200/60 dark:bg-indigo-900/80 truncate max-w-[150px]">
                           {selectedCust.shopName || selectedCust.shop_name || selectedCust.name}
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-indigo-200/60 dark:border-indigo-800/40">
-                        <div>
-                          <span className="text-slate-500 dark:text-slate-400">Previous Balance:</span>
-                          <div className="font-mono font-bold text-slate-800 dark:text-slate-200">
-                            {currencySymbol} {formatStockPrice(prevBal)}
-                          </div>
+                      {/* 5 Key Ledger Points */}
+                      <div className="space-y-1.5 pt-1 border-t border-indigo-200/60 dark:border-indigo-800/40 text-[11px]">
+                        <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+                          <span>• Current Items Total:</span>
+                          <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                            {currencySymbol} {formatStockPrice(currentItemsTot)}
+                          </span>
                         </div>
-                        <div className="text-right">
-                          <span className="text-slate-500 dark:text-slate-400">Credit Limit:</span>
-                          <div className="font-mono font-bold text-indigo-700 dark:text-indigo-300">
-                            {credLimit > 0 ? `${currencySymbol} ${formatStockPrice(credLimit)}` : 'Unlimited'}
-                          </div>
+
+                        <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+                          <span>• Previous Khata Balance:</span>
+                          <span className="font-mono font-bold text-amber-700 dark:text-amber-400">
+                            {currencySymbol} {formatStockPrice(prevBal)}
+                          </span>
+                        </div>
+
+                        <div className="flex justify-between items-center font-bold text-indigo-950 dark:text-indigo-100 pt-1 border-t border-indigo-200/40 dark:border-indigo-800/40">
+                          <span>• Net Payable Amount:</span>
+                          <span className="font-mono font-black text-xs text-indigo-700 dark:text-indigo-300">
+                            {currencySymbol} {formatStockPrice(netPayable)}
+                          </span>
                         </div>
                       </div>
 
-                      {/* Cash Received Towards Bill (Partial payment or 0 for full credit) */}
+                      {/* Amount Received Input */}
                       <div className="pt-1.5 border-t border-indigo-200/60 dark:border-indigo-800/40 space-y-1.5">
                         <div className="flex items-center justify-between">
-                          <span className="font-medium text-slate-700 dark:text-slate-300">Cash Received Now:</span>
+                          <span className="font-medium text-slate-700 dark:text-slate-300 text-[11px]">• Amount Received:</span>
                           <div className="relative w-32">
                             <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-xs">
                               {currencySymbol}
@@ -2377,7 +2410,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                               type="number"
                               min="0"
                               step="1"
-                              placeholder="0 (Full Credit)"
+                              placeholder={paymentMethod === 'KHATA' ? '0 (Credit)' : formatStockPrice(netPayable)}
                               value={cashReceived === '' || isNaN(Number(cashReceived)) ? '' : cashReceived}
                               onChange={(e) => {
                                 if (e.target.value === '') {
@@ -2393,15 +2426,11 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                         </div>
 
                         <div className="flex justify-between items-center text-[11px] pt-1">
-                          <span className="text-slate-600 dark:text-slate-400">Book to Khata (Remaining):</span>
-                          <span className="font-mono font-black text-rose-600 dark:text-rose-400">
-                            +{currencySymbol} {formatStockPrice(remBal)}
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center text-[11px] pt-0.5 font-bold">
-                          <span className="text-indigo-950 dark:text-indigo-100">New Total Balance:</span>
-                          <span className="font-mono font-black text-indigo-700 dark:text-indigo-300">
-                            {currencySymbol} {formatStockPrice(prevBal + remBal)}
+                          <span className="font-semibold text-slate-700 dark:text-slate-300">• Remaining Balance to Khata:</span>
+                          <span className={`font-mono font-black ${
+                            remBal > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
+                          }`}>
+                            {currencySymbol} {formatStockPrice(remBal)}
                           </span>
                         </div>
                       </div>
@@ -2725,6 +2754,38 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
           </div>
         </div>
       )}
+
+      {/* DEDICATED POS CHECKOUT MODAL WITH KHATA LEDGER MATRIX */}
+      <PosCheckoutModal
+        isOpen={isCheckoutModalOpen}
+        onClose={() => {
+          setIsCheckoutModalOpen(false);
+          focusScannerInput();
+        }}
+        cart={cart}
+        customers={customers}
+        selectedCustomerId={selectedCustomerId}
+        onSelectCustomer={(id) => setSelectedCustomerId(id)}
+        paymentMethod={paymentMethod}
+        onSelectPaymentMethod={(m) => setPaymentMethod(m)}
+        amountReceived={cashReceived}
+        onChangeAmountReceived={(val) => setCashReceived(val)}
+        currentItemsTotal={netTotalPayable}
+        currencySymbol={currencySymbol}
+        isWholesaleStore={isWholesaleStore}
+        transportName={transportName}
+        onChangeTransportName={(val) => setTransportName(val)}
+        biltyNumber={biltyNumber}
+        onChangeBiltyNumber={(val) => setBiltyNumber(val)}
+        bookingDestination={bookingDestination}
+        onChangeBookingDestination={(val) => setBookingDestination(val)}
+        notes={notes}
+        onChangeNotes={(val) => setNotes(val)}
+        isSubmitting={isSubmitting}
+        onConfirmCheckout={() => handleCheckout()}
+        activeExchange={activeExchange}
+        exchangeCredit={totalExchangeCredit}
+      />
 
       {/* COMPLETED INVOICE PRINT MODAL */}
       {completedSale && (

@@ -947,9 +947,16 @@ export function buildWhatsAppInvoiceText(sale: any, companySettings: any): strin
     })
     .join('\n');
 
-  const total = formatStockPrice(sale.total_amount || 0);
+  const subtotal = parseFloat(sale.subtotal || 0);
   const discount = parseFloat(sale.discount || 0);
   const exchangeCredit = parseFloat(sale.exchange_credit || 0);
+  const itemsSubtotal = items.reduce((acc: number, it: any) => acc + (parseFloat(it.subtotal || (it.quantity * it.unit_price)) || 0), 0);
+  const currentItemsTotal = Math.max(0, (subtotal > 0 ? subtotal : itemsSubtotal) - discount);
+  const previousBalance = parseFloat(sale.previous_balance || 0);
+  const grandTotalDue = Math.round((currentItemsTotal + previousBalance) * 100) / 100;
+  const paidAmount = parseFloat(sale.paid_amount ?? sale.cash_received ?? grandTotalDue);
+  const remainingBalance = parseFloat(sale.remaining_balance ?? Math.max(0, grandTotalDue - paidAmount));
+  const changeGiven = parseFloat(sale.change_given || (paidAmount > grandTotalDue ? paidAmount - grandTotalDue : 0));
 
   let message = `🛍️ *${storeName}* - Digital Receipt\n`;
   message += `━━━━━━━━━━━━━━━━━━━━\n`;
@@ -966,10 +973,16 @@ export function buildWhatsAppInvoiceText(sale: any, companySettings: any): strin
     message += `🔄 Exchange Credit: -${currency} ${formatStockPrice(exchangeCredit)}\n`;
     if (sale.return_number) message += `📑 Exchange Return #: ${sale.return_number}\n`;
   }
-  message += `⭐ *TOTAL PAYABLE: ${currency} ${total}*\n`;
-  if (parseFloat(sale.cash_received || 0) > 0) {
-    message += `💵 Cash Paid: ${currency} ${formatStockPrice(sale.cash_received)}\n`;
-    message += `🪙 Change Returned: ${currency} ${formatStockPrice(sale.change_given || 0)}\n`;
+  if (previousBalance !== 0) {
+    message += `📋 Previous Khata Balance: ${currency} ${formatStockPrice(previousBalance)}\n`;
+    message += `📦 Current Items Total: ${currency} ${formatStockPrice(currentItemsTotal)}\n`;
+  }
+  message += `⭐ *GRAND TOTAL DUE: ${currency} ${formatStockPrice(grandTotalDue)}*\n`;
+  message += `💵 Amount Paid: ${currency} ${formatStockPrice(paidAmount)}\n`;
+  if (remainingBalance > 0) {
+    message += `🔴 *Balance Carried Forward: ${currency} ${formatStockPrice(remainingBalance)}*\n`;
+  } else if (changeGiven > 0) {
+    message += `🪙 Change Returned: ${currency} ${formatStockPrice(changeGiven)}\n`;
   }
   message += `━━━━━━━━━━━━━━━━━━━━\n`;
   message += `${footerNote} 🙏\n`;
@@ -999,9 +1012,15 @@ export function buildSmsInvoiceText(sale: any, companySettings: any): string {
     })
     .join(', ');
 
-  const total = formatStockPrice(sale.total_amount || 0);
+  const subtotal = parseFloat(sale.subtotal || 0);
   const discount = parseFloat(sale.discount || 0);
   const exchangeCredit = parseFloat(sale.exchange_credit || 0);
+  const itemsSubtotal = items.reduce((acc: number, it: any) => acc + (parseFloat(it.subtotal || (it.quantity * it.unit_price)) || 0), 0);
+  const currentItemsTotal = Math.max(0, (subtotal > 0 ? subtotal : itemsSubtotal) - discount);
+  const previousBalance = parseFloat(sale.previous_balance || 0);
+  const grandTotalDue = Math.round((currentItemsTotal + previousBalance) * 100) / 100;
+  const paidAmount = parseFloat(sale.paid_amount ?? sale.cash_received ?? grandTotalDue);
+  const remainingBalance = parseFloat(sale.remaining_balance ?? Math.max(0, grandTotalDue - paidAmount));
 
   let sms = `${storeName} Receipt\n`;
   sms += `Inv: ${sale.invoice_number} | ${sale.sale_date || ''}\n`;
@@ -1009,7 +1028,9 @@ export function buildSmsInvoiceText(sale: any, companySettings: any): string {
   sms += `Items: ${itemsSummary}\n`;
   if (discount > 0) sms += `Disc: -${currency}${formatStockPrice(discount)}\n`;
   if (exchangeCredit > 0) sms += `Exch Credit: -${currency}${formatStockPrice(exchangeCredit)}\n`;
-  sms += `Total: ${currency} ${total} (${sale.payment_method || 'CASH'})\n`;
+  if (previousBalance !== 0) sms += `Prev Bal: ${currency}${formatStockPrice(previousBalance)} | Items: ${currency}${formatStockPrice(currentItemsTotal)}\n`;
+  sms += `Total Due: ${currency}${formatStockPrice(grandTotalDue)} | Paid: ${currency}${formatStockPrice(paidAmount)}\n`;
+  if (remainingBalance > 0) sms += `Khata Bal: ${currency}${formatStockPrice(remainingBalance)}\n`;
   sms += `${footerNote}`;
   if (phone) sms += ` | Tel: ${phone}`;
 

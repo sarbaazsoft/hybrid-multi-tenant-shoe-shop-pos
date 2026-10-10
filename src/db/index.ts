@@ -162,7 +162,26 @@ const mockStore: Record<string, any[]> = {
       updated_at: new Date().toISOString(),
     },
   ],
-  customers: [],
+  customers: [
+    {
+      id: 1,
+      tenant_id: 1,
+      name: 'Tariq Wholesale Traders',
+      shop_name: 'Tariq Shoes & Sons',
+      market_name: 'Moti Bazar',
+      city: 'Rawalpindi',
+      phone: '+923009876543',
+      email: 'tariq.traders@example.com',
+      address: 'Shop 14, Moti Bazar, Rawalpindi',
+      notes: 'Registered Wholesale Dealer',
+      credit_limit: 100000,
+      current_balance: 0,
+      outstanding_balance: 0,
+      ntn_number: 'NTN-7890123-4',
+      created_at: new Date().toISOString(),
+    },
+  ],
+  customer_khata_ledger: [],
   suppliers: [],
   sales: [],
   sale_items: [],
@@ -187,7 +206,8 @@ let mockIdCounters: Record<string, number> = {
   company_settings: 2,
   categories: 4,
   products: 2,
-  customers: 1,
+  customers: 2,
+  customer_khata_ledger: 1,
   suppliers: 1,
   sales: 1,
   sale_items: 1,
@@ -1174,15 +1194,171 @@ async function executeMockQuery<T = any>(text: string, params: any[] = []): Prom
     if (upper.includes('AS TOTAL_REVENUE') && upper.includes('AS TOTAL_PROFIT')) {
       return { rows: [{ total_revenue: '0', total_profit: '0', total_sales_count: '0' } as unknown as T], rowCount: 1 };
     }
-    return { rows: mockStore.sales as unknown as T[], rowCount: mockStore.sales.length };
+    let sList = [...mockStore.sales];
+    if (upper.includes('WHERE S.ID = $1') || upper.includes('WHERE ID = $1')) {
+      const targetId = Number(params[0]);
+      sList = sList.filter((s) => Number(s.id) === targetId);
+    }
+    return { rows: sList as unknown as T[], rowCount: sList.length };
   }
 
-  if (upper.startsWith('SELECT') && upper.includes('FROM SALE_ITEMS') && upper.includes('AS PROFIT')) {
-    return { rows: [{ profit: '0', cost: '0' } as unknown as T], rowCount: 1 };
+  if (upper.startsWith('INSERT INTO SALES')) {
+    const newSale = {
+      id: nextMockId('sales'),
+      tenant_id: Number(params[0] || 1),
+      invoice_number: String(params[1] || 'INV-000001'),
+      sale_type: String(params[2] || 'RETAIL'),
+      customer_id: params[3] ? Number(params[3]) : null,
+      subtotal: Number(params[4] || 0),
+      discount: Number(params[5] || 0),
+      total_amount: Number(params[6] || 0),
+      total_cartons: Number(params[7] || 0),
+      transport_name: String(params[8] || ''),
+      bilty_number: String(params[9] || ''),
+      booking_destination: String(params[10] || ''),
+      previous_balance: Number(params[11] || 0),
+      paid_amount: Number(params[12] || 0),
+      remaining_balance: Number(params[13] || 0),
+      payment_method: String(params[14] || 'CASH'),
+      cash_received: Number(params[15] || 0),
+      change_given: Number(params[16] || 0),
+      created_by: Number(params[17] || 1),
+      is_min_price_overridden: Boolean(params[18]),
+      overridden_by: params[19] ? Number(params[19]) : null,
+      notes: String(params[20] || ''),
+      sale_date: params[21] ? String(params[21]) : new Date().toISOString().slice(0, 10),
+      created_at: new Date().toISOString(),
+    };
+    mockStore.sales.unshift(newSale);
+    return { rows: [{ id: newSale.id } as unknown as T], rowCount: 1 };
   }
 
-  if (upper.startsWith('SELECT') && upper.includes('FROM CUSTOMERS') && upper.includes('COUNT(*)')) {
-    return { rows: [{ count: String(mockStore.customers.length) } as unknown as T], rowCount: 1 };
+  if (upper.startsWith('INSERT INTO SALE_ITEMS')) {
+    const newItem = {
+      id: nextMockId('sale_items'),
+      tenant_id: Number(params[0] || 1),
+      sale_id: Number(params[1]),
+      product_id: Number(params[2]),
+      product_name: String(params[3]),
+      packing_type: String(params[4] || 'PAIR'),
+      carton_quantity: Number(params[5] || 0),
+      pairs_per_carton: Number(params[6] || 1),
+      quantity: Number(params[7]),
+      unit_price: Number(params[8]),
+      discount: Number(params[9] || 0),
+      subtotal: Number(params[10]),
+      purchase_price: Number(params[11] || 0),
+    };
+    mockStore.sale_items.push(newItem);
+    return { rows: [newItem as unknown as T], rowCount: 1 };
+  }
+
+  if (upper.startsWith('SELECT') && upper.includes('FROM SALE_ITEMS')) {
+    if (upper.includes('AS PROFIT')) {
+      return { rows: [{ profit: '0', cost: '0' } as unknown as T], rowCount: 1 };
+    }
+    if (upper.includes('WHERE SALE_ID = $1')) {
+      const sid = Number(params[0]);
+      const items = mockStore.sale_items.filter((i) => Number(i.sale_id) === sid);
+      return { rows: items as unknown as T[], rowCount: items.length };
+    }
+    return { rows: mockStore.sale_items as unknown as T[], rowCount: mockStore.sale_items.length };
+  }
+
+  // CUSTOMERS
+  if (upper.startsWith('SELECT') && upper.includes('FROM CUSTOMERS')) {
+    if (upper.includes('COUNT(*)')) {
+      return { rows: [{ count: String(mockStore.customers.length) } as unknown as T], rowCount: 1 };
+    }
+    let cList = [...mockStore.customers];
+    if (upper.includes('WHERE C.ID = $1') || upper.includes('WHERE ID = $1')) {
+      const cid = Number(params[0]);
+      cList = cList.filter((c) => Number(c.id) === cid);
+    }
+    return { rows: cList as unknown as T[], rowCount: cList.length };
+  }
+
+  if (upper.startsWith('INSERT INTO CUSTOMERS')) {
+    const newCust = {
+      id: nextMockId('customers'),
+      tenant_id: Number(params[0] || 1),
+      name: String(params[1] || ''),
+      phone: String(params[2] || ''),
+      shop_name: String(params[3] || ''),
+      market_name: String(params[4] || ''),
+      city: String(params[5] || ''),
+      email: String(params[6] || ''),
+      address: String(params[7] || ''),
+      notes: String(params[8] || ''),
+      credit_limit: Number(params[9] || 0),
+      current_balance: Number(params[10] || 0),
+      outstanding_balance: Number(params[11] ?? params[10] ?? 0),
+      ntn_number: String(params[12] || ''),
+      created_at: new Date().toISOString(),
+    };
+    mockStore.customers.unshift(newCust);
+    return { rows: [newCust as unknown as T], rowCount: 1 };
+  }
+
+  if (upper.startsWith('UPDATE CUSTOMERS')) {
+    if (upper.includes('SET OUTSTANDING_BALANCE = $1') || upper.includes('SET CURRENT_BALANCE = $1')) {
+      const newBal = Number(params[0]);
+      const cid = Number(params[1]);
+      const cust = mockStore.customers.find((c) => Number(c.id) === cid);
+      if (cust) {
+        cust.outstanding_balance = newBal;
+        cust.current_balance = newBal;
+      }
+      return { rows: cust ? [cust as unknown as T] : [], rowCount: cust ? 1 : 0 };
+    }
+    const cid = Number(params[params.length - 2]);
+    const cust = mockStore.customers.find((c) => Number(c.id) === cid);
+    if (cust) {
+      cust.name = String(params[0] ?? cust.name);
+      cust.phone = String(params[1] ?? cust.phone);
+      cust.shop_name = String(params[2] ?? cust.shop_name);
+      cust.market_name = String(params[3] ?? cust.market_name);
+      cust.city = String(params[4] ?? cust.city);
+      cust.email = String(params[5] ?? cust.email);
+      cust.address = String(params[6] ?? cust.address);
+      cust.notes = String(params[7] ?? cust.notes);
+      cust.credit_limit = Number(params[8] ?? cust.credit_limit);
+      cust.current_balance = Number(params[9] ?? cust.current_balance);
+      cust.outstanding_balance = Number(params[10] ?? cust.outstanding_balance);
+      cust.ntn_number = String(params[11] ?? cust.ntn_number);
+      return { rows: [cust as unknown as T], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
+  }
+
+  // CUSTOMER_KHATA_LEDGER
+  if (upper.startsWith('SELECT') && upper.includes('FROM CUSTOMER_KHATA_LEDGER')) {
+    let kList = [...mockStore.customer_khata_ledger];
+    if (upper.includes('WHERE CUSTOMER_ID = $1')) {
+      const cid = Number(params[0]);
+      kList = kList.filter((k) => Number(k.customer_id) === cid);
+    }
+    return { rows: kList as unknown as T[], rowCount: kList.length };
+  }
+
+  if (upper.startsWith('INSERT INTO CUSTOMER_KHATA_LEDGER')) {
+    const newEntry = {
+      id: nextMockId('customer_khata_ledger'),
+      tenant_id: Number(params[0] || 1),
+      customer_id: Number(params[1]),
+      transaction_date: String(params[2] || new Date().toISOString().slice(0, 10)),
+      invoice_id: params[3] ? Number(params[3]) : null,
+      invoice_number: String(params[4] || ''),
+      total_bill: Number(params[5] || 0),
+      amount_paid: Number(params[6] || 0),
+      balance_change: Number(params[7] || 0),
+      running_balance: Number(params[8] || 0),
+      payment_method: String(params[9] || 'KHATA'),
+      notes: String(params[10] || ''),
+      created_at: new Date().toISOString(),
+    };
+    mockStore.customer_khata_ledger.unshift(newEntry);
+    return { rows: [newEntry as unknown as T], rowCount: 1 };
   }
 
   if (upper.startsWith('SELECT') && upper.includes('FROM PURCHASES') && upper.includes('COUNT(*)')) {

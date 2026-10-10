@@ -210,6 +210,8 @@ export class TenantScopedDb {
     findMany: async (search?: string) => {
       let query = `
         SELECT c.*,
+               COALESCE(c.outstanding_balance, c.current_balance, 0)::numeric as outstanding_balance,
+               COALESCE(c.current_balance, c.outstanding_balance, 0)::numeric as current_balance,
                COUNT(s.id)::int as total_orders,
                COALESCE(SUM(s.total_amount), 0)::numeric as total_spent,
                FLOOR(COALESCE(SUM(s.total_amount), 0) / 100)::int as loyalty_points,
@@ -234,19 +236,36 @@ export class TenantScopedDb {
 
     findById: async (id: number) => {
       const custRes = await pgClient.query(
-        `SELECT * FROM customers WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        `SELECT c.*,
+                COALESCE(c.outstanding_balance, c.current_balance, 0)::numeric as outstanding_balance,
+                COALESCE(c.current_balance, c.outstanding_balance, 0)::numeric as current_balance
+         FROM customers c
+         WHERE c.id = $1 AND c.tenant_id = $2 LIMIT 1`,
         [id, this.tenantId]
       );
       if (custRes.rows.length === 0) return null;
 
       const salesRes = await pgClient.query(
-        `SELECT id, invoice_number, sale_date, total_amount, payment_method, created_at
+        `SELECT id, invoice_number, sale_date, total_amount, previous_balance, paid_amount, remaining_balance, payment_method, created_at
          FROM sales
          WHERE customer_id = $1 AND tenant_id = $2
-         ORDER BY id DESC LIMIT 20`,
+         ORDER BY id DESC LIMIT 50`,
         [id, this.tenantId]
       );
-      return { customer: custRes.rows[0], sales: salesRes.rows };
+
+      const ledgerRes = await pgClient.query(
+        `SELECT *
+         FROM customer_khata_ledger
+         WHERE customer_id = $1 AND tenant_id = $2
+         ORDER BY id DESC LIMIT 100`,
+        [id, this.tenantId]
+      );
+
+      return {
+        customer: custRes.rows[0],
+        sales: salesRes.rows,
+        ledger: ledgerRes.rows,
+      };
     },
 
     create: async (data: {
@@ -261,12 +280,14 @@ export class TenantScopedDb {
       creditLimit?: number;
       ntnNumber?: string;
       currentBalance?: number;
+      outstandingBalance?: number;
     }) => {
+      const initialBalance = Number(data.outstandingBalance ?? data.currentBalance) || 0;
       const res = await pgClient.query(
         `INSERT INTO customers (
           tenant_id, name, phone, shop_name, market_name, city,
-          email, address, notes, credit_limit, current_balance, ntn_number
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          email, address, notes, credit_limit, current_balance, outstanding_balance, ntn_number
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         RETURNING *`,
         [
           this.tenantId,
@@ -279,10 +300,23 @@ export class TenantScopedDb {
           data.address?.trim() || null,
           data.notes?.trim() || null,
           Math.max(0, Number(data.creditLimit) || 0),
-          Number(data.currentBalance) || 0,
+          initialBalance,
+          initialBalance,
           data.ntnNumber?.trim() || '',
         ]
       );
+
+      // If customer is created with an opening balance > 0, record in Khata ledger
+      if (res.rows[0] && initialBalance > 0) {
+        await pgClient.query(
+          `INSERT INTO customer_khata_ledger (
+            tenant_id, customer_id, transaction_date, invoice_id, invoice_number,
+            total_bill, amount_paid, balance_change, running_balance, payment_method, notes
+          ) VALUES ($1, $2, NOW()::date::text, NULL, 'OPENING-BAL', $3, 0.00, $3, $3, 'OPENING', 'Opening Khata Balance Recorded')`,
+          [this.tenantId, res.rows[0].id, initialBalance]
+        ).catch(() => {});
+      }
+
       return res.rows[0];
     },
 
@@ -298,12 +332,14 @@ export class TenantScopedDb {
       creditLimit?: number;
       ntnNumber?: string;
       currentBalance?: number;
+      outstandingBalance?: number;
     }) => {
+      const targetBalance = Number(data.outstandingBalance ?? data.currentBalance) || 0;
       const res = await pgClient.query(
         `UPDATE customers SET
            name = $1, phone = $2, shop_name = $3, market_name = $4, city = $5,
-           email = $6, address = $7, notes = $8, credit_limit = $9, current_balance = $10, ntn_number = $11
-         WHERE id = $12 AND tenant_id = $13
+           email = $6, address = $7, notes = $8, credit_limit = $9, current_balance = $10, outstanding_balance = $11, ntn_number = $12
+         WHERE id = $13 AND tenant_id = $14
          RETURNING *`,
         [
           data.name.trim(),
@@ -315,7 +351,8 @@ export class TenantScopedDb {
           data.address?.trim() || null,
           data.notes?.trim() || null,
           Math.max(0, Number(data.creditLimit) || 0),
-          Number(data.currentBalance) || 0,
+          targetBalance,
+          targetBalance,
           data.ntnNumber?.trim() || '',
           id,
           this.tenantId,

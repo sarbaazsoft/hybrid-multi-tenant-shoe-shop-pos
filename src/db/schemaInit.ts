@@ -223,6 +223,7 @@ const DATABASE_TABLE_DDL: string[] = [
     notes TEXT,
     credit_limit NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
     current_balance NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    outstanding_balance NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
     ntn_number TEXT DEFAULT '',
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
   )`,
@@ -375,6 +376,21 @@ const DATABASE_TABLE_DDL: string[] = [
     notes TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
   )`,
+  `CREATE TABLE IF NOT EXISTS customer_khata_ledger (
+    id SERIAL PRIMARY KEY,
+    tenant_id INTEGER NOT NULL DEFAULT 1,
+    customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    transaction_date TEXT NOT NULL,
+    invoice_id INTEGER REFERENCES sales(id) ON DELETE SET NULL,
+    invoice_number TEXT DEFAULT '',
+    total_bill NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    amount_paid NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    balance_change NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    running_balance NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    payment_method TEXT DEFAULT 'KHATA',
+    notes TEXT DEFAULT '',
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+  )`,
 ];
 
 const DATABASE_INDEX_DDL: string[] = [
@@ -398,6 +414,9 @@ const DATABASE_INDEX_DDL: string[] = [
   `CREATE UNIQUE INDEX IF NOT EXISTS products_tenant_sku_unique_idx ON products (COALESCE(tenant_id, 1), LOWER(BTRIM(sku))) WHERE sku IS NOT NULL AND BTRIM(sku) <> ''`,
   `CREATE INDEX IF NOT EXISTS customers_tenant_idx ON customers(tenant_id)`,
   `CREATE INDEX IF NOT EXISTS customers_phone_idx ON customers(phone)`,
+  `CREATE INDEX IF NOT EXISTS customer_khata_ledger_tenant_cust_idx ON customer_khata_ledger(tenant_id, customer_id)`,
+  `CREATE INDEX IF NOT EXISTS customer_khata_ledger_date_idx ON customer_khata_ledger(transaction_date)`,
+  `CREATE INDEX IF NOT EXISTS customer_khata_ledger_invoice_idx ON customer_khata_ledger(invoice_id)`,
   `CREATE INDEX IF NOT EXISTS suppliers_tenant_idx ON suppliers(tenant_id)`,
   `CREATE INDEX IF NOT EXISTS purchases_tenant_idx ON purchases(tenant_id)`,
   `CREATE INDEX IF NOT EXISTS supplier_payments_tenant_idx ON supplier_payments(tenant_id)`,
@@ -613,6 +632,11 @@ export async function ensureDatabaseSchema(): Promise<void> {
           END;
           BEGIN
             ALTER TABLE customers ADD COLUMN IF NOT EXISTS current_balance NUMERIC(12, 2) NOT NULL DEFAULT 0.00;
+          EXCEPTION WHEN OTHERS THEN NULL;
+          END;
+          BEGIN
+            ALTER TABLE customers ADD COLUMN IF NOT EXISTS outstanding_balance NUMERIC(12, 2) NOT NULL DEFAULT 0.00;
+            UPDATE customers SET outstanding_balance = COALESCE(current_balance, 0.00) WHERE (outstanding_balance IS NULL OR outstanding_balance = 0) AND current_balance > 0;
           EXCEPTION WHEN OTHERS THEN NULL;
           END;
           BEGIN

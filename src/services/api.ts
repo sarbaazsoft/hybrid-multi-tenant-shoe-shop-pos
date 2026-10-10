@@ -937,6 +937,9 @@ export const api = {
     },
     getById: (id: number) => apiFetch(`/customers/${id}`),
     get: (id: number) => apiFetch(`/customers/${id}`),
+    getLedger: (id: number) => apiFetch(`/customers/${id}/ledger`),
+    recordPayment: (id: number, data: { amount: number; paymentMethod?: string; notes?: string; paymentDate?: string }) =>
+      apiFetch(`/customers/${id}/payments`, { method: 'POST', body: data }),
     create: (data: any) => apiFetch('/customers', { method: 'POST', body: data }),
     update: (id: number, data: any) => apiFetch(`/customers/${id}`, { method: 'PUT', body: data }),
     delete: (id: number) => apiFetch(`/customers/${id}`, { method: 'DELETE' }),

@@ -82,7 +82,7 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({ companyS
     setIsLoadingHistory(true);
     try {
       const res = await api.customers.get(id);
-      setSelectedCustomer(res.customer ? { ...res.customer, sales: res.sales || [] } : null);
+      setSelectedCustomer(res.customer ? { ...res.customer, sales: res.sales || [], ledger: res.ledger || [] } : null);
     } catch (e: any) {
       console.warn('Notice fetching customer details:', e?.message || e);
     } finally {
@@ -388,9 +388,11 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({ companyS
             <table className="w-full text-left text-xs border-collapse">
               <thead className="bg-slate-50/90 dark:bg-gradient-to-r dark:from-purple-900/90 dark:via-indigo-950/85 dark:to-slate-900 text-slate-600 dark:text-white font-bold uppercase tracking-wider text-[10px] border-b border-slate-200 dark:border-purple-800/80">
                 <tr>
-                  <th className="py-3 px-4 w-24">ID</th>
-                  <th className="py-3 px-4">Name</th>
+                  <th className="py-3 px-4 w-20">ID</th>
+                  <th className="py-3 px-4">Name & Dealer</th>
                   <th className="py-3 px-4">Phone</th>
+                  <th className="py-3 px-4">Shop / Market</th>
+                  <th className="py-3 px-4 text-right">Khata Balance</th>
                   <th className="py-3 px-4 text-center w-28">Actions</th>
                 </tr>
               </thead>
@@ -402,6 +404,14 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({ companyS
                     .slice(0, 2)
                     .join('')
                     .toUpperCase();
+                  const custBal = parseFloat(
+                    c.outstanding_balance ??
+                    c.outstandingBalance ??
+                    c.current_balance ??
+                    c.currentBalance ??
+                    c.balance ??
+                    0
+                  ) || 0;
 
                   return (
                     <tr
@@ -418,8 +428,15 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({ companyS
                           <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-purple-950/60 border border-blue-200 dark:border-purple-800/60 flex items-center justify-center text-blue-600 dark:text-purple-300 font-bold text-xs shrink-0 shadow-2xs">
                             {initials}
                           </div>
-                          <div className="font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-purple-400 transition-colors">
-                            {c.name}
+                          <div>
+                            <div className="font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-purple-400 transition-colors">
+                              {c.name}
+                            </div>
+                            {(c.shop_name || c.shopName) && (
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                {c.shop_name || c.shopName}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -431,12 +448,30 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({ companyS
                         </div>
                       </td>
 
+                      <td className="py-3.5 px-4 text-slate-600 dark:text-slate-300">
+                        {c.market_name || c.marketName || c.city ? (
+                          <span>{[c.market_name || c.marketName, c.city].filter(Boolean).join(', ')}</span>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
+                      </td>
+
+                      <td className="py-3.5 px-4 text-right">
+                        <span className={`inline-flex items-center font-mono font-bold px-2 py-0.5 rounded-lg text-xs ${
+                          custBal > 0
+                            ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800/60'
+                            : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60'
+                        }`}>
+                          {currencySymbol} {formatStockPrice(custBal)}
+                        </span>
+                      </td>
+
                       <td className="py-3.5 px-4 text-center" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-center space-x-1.5">
                           <button
                             type="button"
                             onClick={() => handleViewCustomer(c.id)}
-                            title="View Purchase Ledger"
+                            title="View Khata & Purchase Ledger"
                             className="p-1.5 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-purple-300 hover:bg-blue-50 dark:hover:bg-purple-900/40 rounded-lg transition cursor-pointer"
                           >
                             <Eye className="w-4 h-4" />
@@ -568,6 +603,7 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({ companyS
               setSelectedCustomer(null);
               handleOpenEditModal(c);
             }}
+            onPaymentRecorded={loadCustomers}
             onClose={() => setSelectedCustomer(null)}
           />
         )}

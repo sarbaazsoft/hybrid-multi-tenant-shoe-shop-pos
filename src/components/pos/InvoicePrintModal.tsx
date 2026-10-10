@@ -101,15 +101,19 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
     '';
 
   const items = sale.items || [];
-  const totalAmount = parseFloat(sale.total_amount || 0);
-  const subtotal = parseFloat(sale.subtotal || totalAmount);
+  const subtotal = parseFloat(sale.subtotal || 0);
   const discount = parseFloat(sale.discount || 0);
-  const cashReceived = parseFloat(sale.cash_received || totalAmount);
-  const changeGiven = parseFloat(sale.change_given || 0);
+  const itemsSubtotal = items.reduce((acc: number, it: any) => acc + (parseFloat(it.subtotal || (it.quantity * it.unit_price)) || 0), 0);
+  const effectiveSubtotal = subtotal > 0 ? subtotal : (itemsSubtotal > 0 ? itemsSubtotal : parseFloat(sale.total_amount || 0));
+  const currentItemsTotal = Math.max(0, effectiveSubtotal - discount);
 
   const previousBalance = parseFloat(sale.previous_balance || 0);
-  const paidAmount = parseFloat(sale.paid_amount ?? sale.cash_received ?? totalAmount);
-  const remainingBalance = parseFloat(sale.remaining_balance ?? Math.max(0, (previousBalance + totalAmount) - paidAmount));
+  const grandTotalDue = parseFloat(sale.total_amount || (currentItemsTotal + previousBalance));
+  const totalAmount = grandTotalDue;
+  const paidAmount = parseFloat(sale.paid_amount ?? sale.cash_received ?? grandTotalDue);
+  const remainingBalance = parseFloat(sale.remaining_balance ?? Math.max(0, grandTotalDue - paidAmount));
+  const changeGiven = parseFloat(sale.change_given || (paidAmount > grandTotalDue ? paidAmount - grandTotalDue : 0));
+  const cashReceived = paidAmount;
 
   // Generate WhatsApp & SMS text dynamically with optional custom note
   const whatsAppText = useMemo(() => {
@@ -568,28 +572,46 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
 
               {/* Totals */}
               <div className="py-2 space-y-1 text-[11px] border-b border-dashed border-gray-400">
+                {previousBalance !== 0 && (
+                  <div className="flex justify-between font-medium text-slate-700">
+                    <span>Previous Balance:</span>
+                    <span className="font-mono">{currencySymbol} {formatStockPrice(previousBalance)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
-                  <span>Subtotal:</span>
-                  <span>{currencySymbol} {formatStockPrice(subtotal)}</span>
+                  <span>Current Items Total:</span>
+                  <span className="font-mono">{currencySymbol} {formatStockPrice(currentItemsTotal)}</span>
                 </div>
                 {discount > 0 && (
                   <div className="flex justify-between text-emerald-700">
                     <span>Discount:</span>
-                    <span>-{currencySymbol} {formatStockPrice(discount)}</span>
+                    <span className="font-mono">-{currencySymbol} {formatStockPrice(discount)}</span>
                   </div>
                 )}
                 <div className="invoice-total-payable flex justify-between font-bold text-sm text-black dark:text-white pt-1 border-t border-gray-300">
-                  <span>TOTAL PAYABLE:</span>
-                  <span>{currencySymbol} {formatStockPrice(totalAmount)}</span>
+                  <span>GRAND TOTAL DUE:</span>
+                  <span className="font-mono">{currencySymbol} {formatStockPrice(grandTotalDue)}</span>
                 </div>
                 <div className="flex justify-between pt-1">
-                  <span>Cash Received:</span>
-                  <span>{currencySymbol} {formatStockPrice(cashReceived)}</span>
+                  <span>Amount Paid:</span>
+                  <span className="font-mono font-bold">{currencySymbol} {formatStockPrice(paidAmount)}</span>
                 </div>
-                <div className="flex justify-between font-semibold">
-                  <span>Change Given:</span>
-                  <span>{currencySymbol} {formatStockPrice(changeGiven)}</span>
-                </div>
+                {remainingBalance > 0 ? (
+                  <div className="flex justify-between font-bold text-rose-700 pt-0.5 border-t border-dashed border-gray-300">
+                    <span>Balance Carried Forward:</span>
+                    <span className="font-mono">{currencySymbol} {formatStockPrice(remainingBalance)}</span>
+                  </div>
+                ) : changeGiven > 0 ? (
+                  <div className="flex justify-between font-semibold text-emerald-700">
+                    <span>Change Returned:</span>
+                    <span className="font-mono">{currencySymbol} {formatStockPrice(changeGiven)}</span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between font-semibold text-emerald-700">
+                    <span>Account Status:</span>
+                    <span>Paid in Full</span>
+                  </div>
+                )}
               </div>
 
               {/* Footer */}
@@ -754,10 +776,10 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
 
               {/* Summary calculations */}
               <div className="flex justify-end mt-4 pt-3 border-t border-gray-300">
-                <div className="w-72 space-y-1.5 text-xs">
+                <div className="w-80 space-y-1.5 text-xs">
                   <div className="flex justify-between text-gray-600">
-                    <span>Current Bill Subtotal:</span>
-                    <span>{currencySymbol} {formatStockPrice(subtotal)}</span>
+                    <span>Current Items Subtotal:</span>
+                    <span>{currencySymbol} {formatStockPrice(subtotal > 0 ? subtotal : currentItemsTotal)}</span>
                   </div>
                   {discount > 0 && (
                     <div className="flex justify-between text-emerald-700">
@@ -765,38 +787,42 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                       <span>-{currencySymbol} {formatStockPrice(discount)}</span>
                     </div>
                   )}
-                  <div className="invoice-total-payable flex justify-between font-bold text-sm text-gray-900 dark:text-white border-t border-gray-300 pt-1.5">
-                    <span>{isWholesaleInvoice ? 'CURRENT INVOICE TOTAL:' : 'NET PAYABLE:'}</span>
-                    <span>{currencySymbol} {formatStockPrice(totalAmount)}</span>
+                  <div className="flex justify-between font-semibold text-gray-800 border-t border-gray-200 pt-1">
+                    <span>Current Items Total:</span>
+                    <span className="font-mono">{currencySymbol} {formatStockPrice(currentItemsTotal)}</span>
                   </div>
 
-                  {isWholesaleInvoice && previousBalance !== 0 && (
+                  {previousBalance !== 0 && (
                     <div className="flex justify-between text-gray-700 font-medium">
                       <span>Previous Khata Balance:</span>
                       <span className="font-mono">{currencySymbol} {formatStockPrice(previousBalance)}</span>
                     </div>
                   )}
-                  {isWholesaleInvoice && previousBalance !== 0 && (
-                    <div className="flex justify-between font-bold text-gray-900 border-t border-dashed border-gray-200 pt-1">
-                      <span>NET TOTAL DUE:</span>
-                      <span className="font-mono">{currencySymbol} {formatStockPrice(previousBalance + totalAmount)}</span>
-                    </div>
-                  )}
+
+                  <div className="invoice-total-payable flex justify-between font-bold text-sm text-gray-900 dark:text-white border-t border-gray-300 pt-1.5">
+                    <span>GRAND TOTAL DUE:</span>
+                    <span className="font-mono">{currencySymbol} {formatStockPrice(grandTotalDue)}</span>
+                  </div>
 
                   <div className="flex justify-between text-gray-700 pt-1">
-                    <span>{sale.payment_method === 'KHATA' ? 'Paid / Received Now:' : 'Cash Received:'}</span>
+                    <span>{sale.payment_method === 'KHATA' ? 'Amount Paid / Received Now:' : 'Amount Paid:'}</span>
                     <span className="font-mono">{currencySymbol} {formatStockPrice(paidAmount)}</span>
                   </div>
 
-                  {sale.payment_method === 'KHATA' || (isWholesaleInvoice && remainingBalance > 0) ? (
-                    <div className="flex justify-between text-rose-700 font-bold border-t border-gray-200 pt-1">
-                      <span>Remaining Khata Balance:</span>
+                  {remainingBalance > 0 ? (
+                    <div className="flex justify-between text-rose-700 font-bold border-t border-dashed border-gray-300 pt-1">
+                      <span>Balance Remaining / Carried Forward:</span>
                       <span className="font-mono">{currencySymbol} {formatStockPrice(remainingBalance)}</span>
                     </div>
-                  ) : (
-                    <div className="flex justify-between text-gray-800 font-medium">
+                  ) : changeGiven > 0 ? (
+                    <div className="flex justify-between text-emerald-700 font-semibold border-t border-dashed border-gray-300 pt-1">
                       <span>Change Given:</span>
                       <span className="font-mono">{currencySymbol} {formatStockPrice(changeGiven)}</span>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between text-emerald-700 font-semibold border-t border-dashed border-gray-300 pt-1">
+                      <span>Account Status:</span>
+                      <span>Paid in Full</span>
                     </div>
                   )}
                 </div>
@@ -894,28 +920,46 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
             </div>
 
             <div style={{ padding: '6px 0', borderBottom: '1px dashed #666', fontSize: '11px', color: '#000000' }}>
+              {previousBalance !== 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px', fontWeight: 600 }}>
+                  <span>Previous Balance:</span>
+                  <span style={{ fontFamily: 'monospace' }}>{currencySymbol} {formatStockPrice(previousBalance)}</span>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
-                <span>Subtotal:</span>
-                <span>{currencySymbol} {formatStockPrice(subtotal)}</span>
+                <span>Current Items Total:</span>
+                <span style={{ fontFamily: 'monospace' }}>{currencySymbol} {formatStockPrice(currentItemsTotal)}</span>
               </div>
               {discount > 0 && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
                   <span>Discount:</span>
-                  <span>-{currencySymbol} {formatStockPrice(discount)}</span>
+                  <span style={{ fontFamily: 'monospace' }}>-{currencySymbol} {formatStockPrice(discount)}</span>
                 </div>
               )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '13px', marginTop: '4px', paddingTop: '4px', borderTop: '1px solid #ccc', color: '#000000' }}>
-                <span>TOTAL PAYABLE:</span>
-                <span>{currencySymbol} {formatStockPrice(totalAmount)}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '13px', marginTop: '4px', paddingTop: '4px', borderTop: '1px solid #000', color: '#000000' }}>
+                <span>GRAND TOTAL DUE:</span>
+                <span style={{ fontFamily: 'monospace' }}>{currencySymbol} {formatStockPrice(grandTotalDue)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}>
-                <span>Cash Received:</span>
-                <span>{currencySymbol} {formatStockPrice(cashReceived)}</span>
+                <span>Amount Paid:</span>
+                <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{currencySymbol} {formatStockPrice(paidAmount)}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginTop: '2px' }}>
-                <span>Change Given:</span>
-                <span>{currencySymbol} {formatStockPrice(changeGiven)}</span>
-              </div>
+              {remainingBalance > 0 ? (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginTop: '3px', paddingTop: '3px', borderTop: '1px dashed #666' }}>
+                  <span>Balance Carried Forward:</span>
+                  <span style={{ fontFamily: 'monospace' }}>{currencySymbol} {formatStockPrice(remainingBalance)}</span>
+                </div>
+              ) : changeGiven > 0 ? (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginTop: '3px' }}>
+                  <span>Change Given:</span>
+                  <span style={{ fontFamily: 'monospace' }}>{currencySymbol} {formatStockPrice(changeGiven)}</span>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginTop: '3px' }}>
+                  <span>Account Status:</span>
+                  <span>Paid in Full</span>
+                </div>
+              )}
             </div>
 
             <div style={{ textAlign: 'center', paddingTop: '8px', color: '#000000' }}>
@@ -1057,10 +1101,10 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
             </table>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px', color: '#000000' }}>
-              <div style={{ width: '270px', lineHeight: '1.6' }}>
+              <div style={{ width: '280px', lineHeight: '1.6' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Current Bill Subtotal:</span>
-                  <span>{currencySymbol} {formatStockPrice(subtotal)}</span>
+                  <span>Current Items Subtotal:</span>
+                  <span>{currencySymbol} {formatStockPrice(subtotal > 0 ? subtotal : currentItemsTotal)}</span>
                 </div>
                 {discount > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -1068,38 +1112,42 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                     <span>-{currencySymbol} {formatStockPrice(discount)}</span>
                   </div>
                 )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '13px', borderTop: '1px solid #000', paddingTop: '4px' }}>
-                  <span>{isWholesaleInvoice ? 'Current Invoice Total:' : 'Net Payable:'}</span>
-                  <span>{currencySymbol} {formatStockPrice(totalAmount)}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #ccc', paddingTop: '3px' }}>
+                  <span>Current Items Total:</span>
+                  <span style={{ fontFamily: 'monospace' }}>{currencySymbol} {formatStockPrice(currentItemsTotal)}</span>
                 </div>
 
-                {isWholesaleInvoice && previousBalance !== 0 && (
+                {previousBalance !== 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>Previous Khata Balance:</span>
-                    <span>{currencySymbol} {formatStockPrice(previousBalance)}</span>
-                  </div>
-                )}
-                {isWholesaleInvoice && previousBalance !== 0 && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', borderTop: '1px dashed #999', paddingTop: '2px' }}>
-                    <span>Net Total Due:</span>
-                    <span>{currencySymbol} {formatStockPrice(previousBalance + totalAmount)}</span>
+                    <span style={{ fontFamily: 'monospace' }}>{currencySymbol} {formatStockPrice(previousBalance)}</span>
                   </div>
                 )}
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '2px' }}>
-                  <span>{sale.payment_method === 'KHATA' ? 'Paid / Received Now:' : 'Cash Paid:'}</span>
-                  <span>{currencySymbol} {formatStockPrice(paidAmount)}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '13px', borderTop: '1px solid #000', paddingTop: '4px' }}>
+                  <span>GRAND TOTAL DUE:</span>
+                  <span style={{ fontFamily: 'monospace' }}>{currencySymbol} {formatStockPrice(grandTotalDue)}</span>
                 </div>
 
-                {sale.payment_method === 'KHATA' || (isWholesaleInvoice && remainingBalance > 0) ? (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', borderTop: '1px solid #000', paddingTop: '4px', color: '#b91c1c' }}>
-                    <span>Remaining Khata Balance:</span>
-                    <span>{currencySymbol} {formatStockPrice(remainingBalance)}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '2px' }}>
+                  <span>{sale.payment_method === 'KHATA' ? 'Amount Paid / Received Now:' : 'Amount Paid:'}</span>
+                  <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{currencySymbol} {formatStockPrice(paidAmount)}</span>
+                </div>
+
+                {remainingBalance > 0 ? (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', borderTop: '1px dashed #666', paddingTop: '3px', color: '#b91c1c' }}>
+                    <span>Balance Remaining / Carried Forward:</span>
+                    <span style={{ fontFamily: 'monospace' }}>{currencySymbol} {formatStockPrice(remainingBalance)}</span>
+                  </div>
+                ) : changeGiven > 0 ? (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', borderTop: '1px dashed #666', paddingTop: '3px' }}>
+                    <span>Change Given:</span>
+                    <span style={{ fontFamily: 'monospace' }}>{currencySymbol} {formatStockPrice(changeGiven)}</span>
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
-                    <span>Change Given:</span>
-                    <span>{currencySymbol} {formatStockPrice(changeGiven)}</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', borderTop: '1px dashed #666', paddingTop: '3px' }}>
+                    <span>Account Status:</span>
+                    <span>Paid in Full</span>
                   </div>
                 )}
               </div>
